@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 28" width="132" height="28" role="img" aria-label="CloudChain">
+  <g fill="none" stroke="#22d3ee" stroke-width="1.8" stroke-linecap="round">
+    <path d="M7 17.5a4.6 4.6 0 0 1 .7-9.16 6.3 6.3 0 0 1 12.02 1.5A3.9 3.9 0 0 1 19.6 17.5z"/>
+    <path d="M10.4 20.6l2.6-2.6M15.4 20.6l2.6-2.6" stroke="#7ee0c3"/>
+  </g>
+  <text x="30" y="19.5" font-family="Segoe UI, system-ui, sans-serif" font-size="15" font-weight="600" fill="#e6edf3">Cloud<tspan fill="#22d3ee">Chain</tspan></text>
+</svg>

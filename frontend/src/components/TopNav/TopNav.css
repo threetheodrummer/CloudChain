@@ -1,0 +1,41 @@
+/* CardNav positions itself absolutely; this host anchors it to the viewport
+   so the bar stays put while the page content scrolls beneath it. */
+.top-nav-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 99;
+}
+
+.top-nav-host .card-nav {
+  border: 1px solid rgba(40, 54, 78, 0.9);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+/* CardNav ships a hardcoded "Get Started" CTA. The app now gates the scan
+   options behind the landing page's own Get Started button, so this one is
+   redundant -- hidden here rather than by editing CardNav.jsx. */
+.top-nav-host .card-nav-cta-button {
+  display: none;
+}
+
+.top-nav-host .nav-card {
+  border: 1px solid rgba(40, 54, 78, 0.75);
+}
+
+.top-nav-host .nav-card-label {
+  color: #22d3ee;
+  font-weight: 500;
+}
+
+.top-nav-host .nav-card-link {
+  color: #9aabc0;
+}
+
+.top-nav-host .nav-card-link:hover {
+  color: #e6edf3;
+  opacity: 1;
+}

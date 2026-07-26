@@ -1,0 +1,41 @@
+/* BorderGlow's inner wrapper defaults to overflow:auto, which would give
+   these panels their own scrollbars. Our panels size to their content. */
+.glow-panel > .border-glow-inner {
+  overflow: visible;
+  height: 100%;
+}
+
+.glow-panel {
+  border-color: rgba(40, 54, 78, 0.9);
+}
+
+/* Panels wrapped in a GlowPanel no longer draw their own surface -- the glow
+   card supplies the background, border and radius. */
+.glow-panel .aws-connect__panel,
+.glow-panel .scan-progress__panel,
+.glow-panel .about__panel,
+.glow-panel .summary-card,
+.glow-panel .path-card,
+.glow-panel .history__surface,
+.glow-panel .mode-card,
+.glow-panel .landing__stat {
+  background: none;
+  border: none;
+  border-radius: 0;
+  backdrop-filter: none;
+  box-shadow: none;
+  height: 100%;
+}
+
+/* Keep click/hover affordance on interactive panels without the old
+   translate, which would fight the glow card's transform. */
+.glow-panel .mode-card:hover {
+  transform: none;
+  background: rgba(34, 211, 238, 0.04);
+}
+
+.glow-panel-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}

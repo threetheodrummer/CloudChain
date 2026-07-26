@@ -1,0 +1,75 @@
+.attack-graph {
+  padding: 20px 20px 16px;
+}
+
+.attack-graph__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.attack-graph__edge {
+  animation: ag-flow 1.4s linear infinite;
+}
+
+@keyframes ag-flow {
+  to { stroke-dashoffset: -14; }
+}
+
+.attack-graph__type {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  text-anchor: middle;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.attack-graph__label {
+  font-size: 13px;
+  fill: #e6edf3;
+  text-anchor: middle;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.attack-graph__issues {
+  font-size: 9.5px;
+  fill: #7d8da3;
+  text-anchor: middle;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.attack-graph__step {
+  font-size: 11px;
+  fill: #5f7086;
+  text-anchor: end;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.attack-graph__relation {
+  font-size: 11px;
+  fill: #ff8fa3;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.attack-graph__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #7d8da3;
+}
+
+.attack-graph__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.attack-graph__key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid;
+  display: inline-block;
+}

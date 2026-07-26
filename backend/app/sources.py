@@ -1,0 +1,478 @@
+"""
+Data source abstraction.
+
+Every scanner is written against the AWSDataSource interface below and does
+not know or care whether it's talking to a live AWS account or to seeded
+demo data. This is what lets CloudChain run identically in --mode demo and
+--mode real: swap the data source, everything downstream (scanners, graph,
+risk scoring) is unaffected.
+"""
+from __future__ import annotations
+
+import logging
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("cloudchain.sources")
+
+
+class AWSDataSource(ABC):
+    # --- S3 ---
+    @abstractmethod
+    def list_buckets(self) -> List[str]: ...
+
+    @abstractmethod
+    def get_public_access_block(self, bucket: str) -> Dict[str, bool]: ...
+
+    @abstractmethod
+    def is_bucket_acl_public(self, bucket: str) -> bool: ...
+
+    @abstractmethod
+    def is_bucket_policy_public(self, bucket: str) -> bool: ...
+
+    @abstractmethod
+    def is_bucket_encrypted(self, bucket: str) -> bool: ...
+
+    @abstractmethod
+    def is_bucket_versioned(self, bucket: str) -> bool: ...
+
+    @abstractmethod
+    def list_object_keys(self, bucket: str, limit: int = 1000) -> List[str]: ...
+
+    def leaked_credentials_hint(self, bucket: str) -> Optional[str]:
+        """Ground-truth hint used only in demo mode. Real mode returns None;
+        real correlation instead relies purely on object-key pattern matching
+        (see s3_scanner.CREDENTIAL_KEY_PATTERNS)."""
+        return None
+
+    # --- IAM ---
+    @abstractmethod
+    def list_iam_users(self) -> List[str]: ...
+
+    @abstractmethod
+    def user_has_mfa(self, user: str) -> bool: ...
+
+    @abstractmethod
+    def list_access_keys(self, user: str) -> List[Dict[str, Any]]: ...
+
+    @abstractmethod
+    def list_user_policy_names(self, user: str) -> List[str]: ...
+
+    @abstractmethod
+    def list_iam_roles(self) -> List[str]: ...
+
+    @abstractmethod
+    def list_role_policy_names(self, role: str) -> List[str]: ...
+
+    @abstractmethod
+    def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
+        """Return a flattened list of (action, resource) pairs granted (Allow
+        effect only) by the given policy name."""
+        ...
+
+    @abstractmethod
+    def get_account_password_policy(self) -> Dict[str, Any]: ...
+
+    # --- EC2 / Security Groups ---
+    @abstractmethod
+    def list_security_groups(self) -> List[Dict[str, Any]]: ...
+
+
+class DemoAWSDataSource(AWSDataSource):
+    """Reads from the seeded synthetic account in app/demo/mock_aws.py."""
+
+    def __init__(self):
+        from app.demo import mock_aws
+        self._m = mock_aws
+        self._buckets = {b["name"]: b for b in mock_aws.BUCKETS}
+        self._users = {u["name"]: u for u in mock_aws.IAM_USERS}
+        self._roles = {r["name"]: r for r in mock_aws.IAM_ROLES}
+
+    def list_buckets(self) -> List[str]:
+        return list(self._buckets.keys())
+
+    def get_public_access_block(self, bucket: str) -> Dict[str, bool]:
+        return dict(self._buckets[bucket]["public_access_block"])
+
+    def is_bucket_acl_public(self, bucket: str) -> bool:
+        return bool(self._buckets[bucket]["acl_public"])
+
+    def is_bucket_policy_public(self, bucket: str) -> bool:
+        return bool(self._buckets[bucket]["policy_public"])
+
+    def is_bucket_encrypted(self, bucket: str) -> bool:
+        return bool(self._buckets[bucket]["encryption_enabled"])
+
+    def is_bucket_versioned(self, bucket: str) -> bool:
+        return bool(self._buckets[bucket]["versioning_enabled"])
+
+    def list_object_keys(self, bucket: str, limit: int = 1000) -> List[str]:
+        return list(self._buckets[bucket]["objects"])[:limit]
+
+    def leaked_credentials_hint(self, bucket: str) -> Optional[str]:
+        return self._buckets[bucket].get("leaked_credentials_for")
+
+    def list_iam_users(self) -> List[str]:
+        return list(self._users.keys())
+
+    def user_has_mfa(self, user: str) -> bool:
+        return bool(self._users[user]["mfa_enabled"])
+
+    def list_access_keys(self, user: str) -> List[Dict[str, Any]]:
+        return list(self._users[user]["access_keys"])
+
+    def list_user_policy_names(self, user: str) -> List[str]:
+        return list(self._users[user]["attached_policies"])
+
+    def list_iam_roles(self) -> List[str]:
+        return list(self._roles.keys())
+
+    def list_role_policy_names(self, role: str) -> List[str]:
+        return list(self._roles[role]["attached_policies"])
+
+    def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
+        return list(self._m.IAM_POLICY_DOCUMENTS.get(policy_name, []))
+
+    def get_account_password_policy(self) -> Dict[str, Any]:
+        return dict(self._m.ACCOUNT_PASSWORD_POLICY)
+
+    def list_security_groups(self) -> List[Dict[str, Any]]:
+        return [dict(sg) for sg in self._m.SECURITY_GROUPS]
+
+
+class RealAWSDataSource(AWSDataSource):
+    """Talks to a live AWS account via boto3.
+
+    Credentials come from one of two places:
+      1. Explicitly passed in (what the web UI does -- the user submits an
+         access key pair, it is used for the duration of one scan and then
+         discarded). These are NEVER written to the database, to disk, or to
+         logs; see app/jobs.py.
+      2. The ambient boto3 credential chain (env vars, ~/.aws/credentials,
+         instance role) when nothing is passed -- what the CLI uses.
+
+    Every call is wrapped so a missing permission (AccessDenied) degrades to
+    an empty/safe result with a logged warning instead of crashing the whole
+    scan -- real accounts rarely grant a scanner every permission it asks for.
+    """
+
+    def __init__(
+        self,
+        region: str = "us-east-1",
+        access_key_id: Optional[str] = None,
+        secret_access_key: Optional[str] = None,
+        session_token: Optional[str] = None,
+    ):
+        import boto3
+
+        if access_key_id and secret_access_key:
+            session = boto3.Session(
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+                aws_session_token=session_token or None,
+                region_name=region,
+            )
+        else:
+            session = boto3.Session(region_name=region)
+
+        self._s3 = session.client("s3")
+        self._iam = session.client("iam")
+        self._ec2 = session.client("ec2")
+
+    @staticmethod
+    def _safe(fn, default):
+        try:
+            return fn()
+        except Exception as exc:  # botocore.exceptions.ClientError, etc.
+            logger.warning("AWS call failed, degrading to default: %s", exc)
+            return default
+
+    # --- S3 ---
+    def list_buckets(self) -> List[str]:
+        resp = self._safe(lambda: self._s3.list_buckets(), {"Buckets": []})
+        return [b["Name"] for b in resp.get("Buckets", [])]
+
+    def get_public_access_block(self, bucket: str) -> Dict[str, bool]:
+        def call():
+            resp = self._s3.get_public_access_block(Bucket=bucket)
+            return resp["PublicAccessBlockConfiguration"]
+
+        return self._safe(
+            call,
+            {
+                "BlockPublicAcls": False,
+                "BlockPublicPolicy": False,
+                "IgnorePublicAcls": False,
+                "RestrictPublicBuckets": False,
+            },
+        )
+
+    def is_bucket_acl_public(self, bucket: str) -> bool:
+        def call():
+            grants = self._s3.get_bucket_acl(Bucket=bucket).get("Grants", [])
+            public_uris = {
+                "http://acs.amazonaws.com/groups/global/AllUsers",
+                "http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
+            }
+            for g in grants:
+                grantee = g.get("Grantee", {})
+                if grantee.get("URI") in public_uris:
+                    return True
+            return False
+
+        return self._safe(call, False)
+
+    def is_bucket_policy_public(self, bucket: str) -> bool:
+        def call():
+            import json
+
+            policy = json.loads(self._s3.get_bucket_policy(Bucket=bucket)["Policy"])
+            for stmt in policy.get("Statement", []):
+                if stmt.get("Effect") != "Allow":
+                    continue
+                principal = stmt.get("Principal")
+                if principal == "*" or (isinstance(principal, dict) and principal.get("AWS") == "*"):
+                    return True
+            return False
+
+        return self._safe(call, False)
+
+    def is_bucket_encrypted(self, bucket: str) -> bool:
+        def call():
+            self._s3.get_bucket_encryption(Bucket=bucket)
+            return True
+
+        return self._safe(call, False)
+
+    def is_bucket_versioned(self, bucket: str) -> bool:
+        def call():
+            resp = self._s3.get_bucket_versioning(Bucket=bucket)
+            return resp.get("Status") == "Enabled"
+
+        return self._safe(call, False)
+
+    def list_object_keys(self, bucket: str, limit: int = 1000) -> List[str]:
+        def call():
+            keys: List[str] = []
+            paginator = self._s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, PaginationConfig={"MaxItems": limit}):
+                for obj in page.get("Contents", []):
+                    keys.append(obj["Key"])
+            return keys
+
+        return self._safe(call, [])
+
+    # --- IAM ---
+    def list_iam_users(self) -> List[str]:
+        def call():
+            users = []
+            paginator = self._iam.get_paginator("list_users")
+            for page in paginator.paginate():
+                users.extend(u["UserName"] for u in page["Users"])
+            return users
+
+        return self._safe(call, [])
+
+    def user_has_mfa(self, user: str) -> bool:
+        def call():
+            resp = self._iam.list_mfa_devices(UserName=user)
+            return len(resp.get("MFADevices", [])) > 0
+
+        return self._safe(call, False)
+
+    def list_access_keys(self, user: str) -> List[Dict[str, Any]]:
+        def call():
+            resp = self._iam.list_access_keys(UserName=user)
+            keys = []
+            for k in resp.get("AccessKeyMetadata", []):
+                keys.append(
+                    {
+                        "id": k["AccessKeyId"],
+                        "status": k["Status"],
+                        "created": k["CreateDate"].isoformat(),
+                        "last_used": self._get_key_last_used(k["AccessKeyId"]),
+                    }
+                )
+            return keys
+
+        return self._safe(call, [])
+
+    def _get_key_last_used(self, access_key_id: str) -> Optional[str]:
+        def call():
+            resp = self._iam.get_access_key_last_used(AccessKeyId=access_key_id)
+            last_used = resp.get("AccessKeyLastUsed", {}).get("LastUsedDate")
+            return last_used.isoformat() if last_used else None
+
+        return self._safe(call, None)
+
+    def list_user_policy_names(self, user: str) -> List[str]:
+        def call():
+            names = [
+                p["PolicyName"]
+                for p in self._iam.list_attached_user_policies(UserName=user).get("AttachedPolicies", [])
+            ]
+            names += self._iam.list_user_policies(UserName=user).get("PolicyNames", [])
+            return names
+
+        return self._safe(call, [])
+
+    def list_iam_roles(self) -> List[str]:
+        def call():
+            roles = []
+            paginator = self._iam.get_paginator("list_roles")
+            for page in paginator.paginate():
+                roles.extend(r["RoleName"] for r in page["Roles"])
+            return roles
+
+        return self._safe(call, [])
+
+    def list_role_policy_names(self, role: str) -> List[str]:
+        def call():
+            names = [
+                p["PolicyName"]
+                for p in self._iam.list_attached_role_policies(RoleName=role).get("AttachedPolicies", [])
+            ]
+            names += self._iam.list_role_policies(RoleName=role).get("PolicyNames", [])
+            return names
+
+        return self._safe(call, [])
+
+    def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
+        """Best-effort resolution: tries AWS-managed policy by name first,
+        since that covers the common escalation-relevant policies (e.g.
+        AdministratorAccess). Customer-managed/inline lookups by bare name
+        require the caller to pass a full ARN in real deployments; this
+        keeps the interface simple for the demo/real parity we need here."""
+
+        def call():
+            arn = f"arn:aws:iam::aws:policy/{policy_name}"
+            pol = self._iam.get_policy(PolicyArn=arn)["Policy"]
+            version_id = pol["DefaultVersionId"]
+            doc = self._iam.get_policy_version(PolicyArn=arn, VersionId=version_id)
+            statement = doc["PolicyVersion"]["Document"].get("Statement", [])
+            pairs = []
+            for stmt in statement if isinstance(statement, list) else [statement]:
+                if stmt.get("Effect") != "Allow":
+                    continue
+                actions = stmt.get("Action", [])
+                actions = [actions] if isinstance(actions, str) else actions
+                resources = stmt.get("Resource", [])
+                resources = [resources] if isinstance(resources, str) else resources
+                for a in actions:
+                    for r in resources or ["*"]:
+                        pairs.append((a, r))
+            return pairs
+
+        return self._safe(call, [])
+
+    def get_account_password_policy(self) -> Dict[str, Any]:
+        def call():
+            resp = self._iam.get_account_password_policy()
+            p = resp["PasswordPolicy"]
+            return {
+                "minimum_password_length": p.get("MinimumPasswordLength", 0),
+                "require_symbols": p.get("RequireSymbols", False),
+                "require_numbers": p.get("RequireNumbers", False),
+                "require_uppercase": p.get("RequireUppercaseCharacters", False),
+                "require_lowercase": p.get("RequireLowercaseCharacters", False),
+            }
+
+        return self._safe(
+            call,
+            {
+                "minimum_password_length": 0,
+                "require_symbols": False,
+                "require_numbers": False,
+                "require_uppercase": False,
+                "require_lowercase": False,
+            },
+        )
+
+    # --- EC2 / Security Groups ---
+    def list_security_groups(self) -> List[Dict[str, Any]]:
+        def call():
+            groups = []
+            paginator = self._ec2.get_paginator("describe_security_groups")
+            for page in paginator.paginate():
+                for sg in page["SecurityGroups"]:
+                    ingress = []
+                    for perm in sg.get("IpPermissions", []):
+                        from_port = perm.get("FromPort", 0)
+                        to_port = perm.get("ToPort", 65535)
+                        protocol = perm.get("IpProtocol", "-1")
+                        for ip_range in perm.get("IpRanges", []):
+                            ingress.append(
+                                {
+                                    "cidr": ip_range.get("CidrIp"),
+                                    "from_port": from_port,
+                                    "to_port": to_port,
+                                    "protocol": protocol,
+                                }
+                            )
+                    groups.append(
+                        {
+                            "group_id": sg["GroupId"],
+                            "name": sg.get("GroupName", sg["GroupId"]),
+                            "ingress": ingress,
+                        }
+                    )
+            return groups
+
+        return self._safe(call, [])
+
+
+def validate_credentials(
+    region: str = "us-east-1",
+    access_key_id: Optional[str] = None,
+    secret_access_key: Optional[str] = None,
+    session_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Verify a credential pair via STS GetCallerIdentity before running a full
+    scan, so the UI can fail fast with a clear message instead of returning an
+    empty report. Returns {"valid": bool, "account": str, "arn": str, "error": str}.
+    """
+    try:
+        # Imported inside the try: a broken or missing boto3 install must
+        # surface as a clean validation failure, not a 500 from the API.
+        import boto3
+
+        if access_key_id and secret_access_key:
+            session = boto3.Session(
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+                aws_session_token=session_token or None,
+                region_name=region,
+            )
+        else:
+            session = boto3.Session(region_name=region)
+
+        identity = session.client("sts").get_caller_identity()
+        return {
+            "valid": True,
+            "account": identity.get("Account", ""),
+            "arn": identity.get("Arn", ""),
+            "error": "",
+        }
+    except Exception as exc:
+        # Deliberately does not echo the submitted keys back in the message.
+        return {"valid": False, "account": "", "arn": "", "error": str(exc)}
+
+
+def get_data_source(
+    mode: str,
+    region: str = "us-east-1",
+    access_key_id: Optional[str] = None,
+    secret_access_key: Optional[str] = None,
+    session_token: Optional[str] = None,
+) -> AWSDataSource:
+    if mode == "demo":
+        return DemoAWSDataSource()
+    if mode == "real":
+        return RealAWSDataSource(
+            region=region,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            session_token=session_token,
+        )
+    raise ValueError(f"Unknown mode: {mode!r} (expected 'demo' or 'real')")

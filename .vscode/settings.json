@@ -1,0 +1,7 @@
+{
+  "python.analysis.extraPaths": ["./backend"],
+  "python.autoComplete.extraPaths": ["./backend"],
+  "python.testing.pytestArgs": ["backend/tests"],
+  "python.testing.pytestEnabled": true,
+  "python.terminal.activateEnvironment": true
+}

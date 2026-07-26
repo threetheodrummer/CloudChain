@@ -1,0 +1,31 @@
+.wordmark {
+  position: relative;
+  display: inline-block;
+  line-height: 1.05;
+}
+
+.wordmark__text {
+  background: linear-gradient(92deg, #e6edf3 0%, #7ee0c3 46%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
+}
+
+.wordmark--lg .wordmark__text {
+  font-size: 58px;
+}
+
+.wordmark--md .wordmark__text {
+  font-size: 30px;
+}
+
+.wordmark--sm .wordmark__text {
+  font-size: 22px;
+}
+
+@media (max-width: 640px) {
+  .wordmark--lg .wordmark__text {
+    font-size: 40px;
+  }
+}

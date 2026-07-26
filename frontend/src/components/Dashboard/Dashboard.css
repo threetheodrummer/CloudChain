@@ -1,0 +1,318 @@
+.app-shell {
+  position: relative;
+  z-index: 2;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 150px 24px 72px;
+}
+
+.app-shell__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.app-shell__header h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+}
+
+.app-shell__scan-id {
+  font-size: 12px;
+  color: #5f7086;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.app-shell__header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-shell__mode-badge {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7ee0c3;
+  border: 1px solid rgba(126, 224, 195, 0.4);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.app-shell__new-scan {
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 8px;
+  color: #22d3ee;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.app-shell__new-scan:hover {
+  background: rgba(34, 211, 238, 0.18);
+}
+
+.app-shell__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.summary-card {
+  background: rgba(14, 20, 32, 0.6);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(28, 37, 54, 0.9);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-card--paths .summary-card__value {
+  color: #ff5d7a;
+}
+
+.summary-card__value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.summary-card__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7a8f;
+}
+
+.app-shell__chart,
+.app-shell__paths,
+.app-shell__findings,
+.app-shell__drift {
+  margin-bottom: 32px;
+}
+
+.app-shell h2 {
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9fb0c3;
+  margin: 0 0 14px;
+}
+
+.sev-chart__bar {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sev-chart__seg--critical { background: #ff5d7a; }
+.sev-chart__seg--high { background: #ff9d5c; }
+.sev-chart__seg--medium { background: #ffd166; }
+.sev-chart__seg--low { background: #8ecae6; }
+
+.sev-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #7d8da3;
+}
+
+.sev-chart__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sev-chart__key i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.sev-chart__key--critical i { background: #ff5d7a; }
+.sev-chart__key--high i { background: #ff9d5c; }
+.sev-chart__key--medium i { background: #ffd166; }
+.sev-chart__key--low i { background: #8ecae6; }
+
+.sev-chart__key strong {
+  color: #e6edf3;
+  font-weight: 600;
+}
+
+.path-card {
+  background: linear-gradient(135deg, rgba(255, 93, 122, 0.09), rgba(14, 20, 32, 0.5));
+  border: 1px solid rgba(255, 93, 122, 0.35);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.path-card__severity {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #ff5d7a;
+  margin-bottom: 10px;
+}
+
+.path-card__steps {
+  margin: 0;
+  padding-left: 20px;
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.path-card__steps li {
+  margin-bottom: 4px;
+}
+
+.path-card__outcome {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #ff8fa3;
+  font-weight: 600;
+}
+
+.app-shell__findings table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.app-shell__findings th,
+.app-shell__findings td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(28, 37, 54, 0.9);
+}
+
+.app-shell__findings th {
+  color: #6b7a8f;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.row--chained {
+  background: rgba(255, 93, 122, 0.05);
+}
+
+.cell--score {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: #e6edf3;
+}
+
+.cell--issue {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  color: #9aabc0;
+}
+
+.cell--resource {
+  color: #9aabc0;
+}
+
+.chained-flag {
+  font-size: 11px;
+  color: #ff8fa3;
+  border: 1px solid rgba(255, 93, 122, 0.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.severity-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.severity-pill--critical { background: rgba(255, 93, 122, 0.15); color: #ff5d7a; }
+.severity-pill--high { background: rgba(255, 157, 92, 0.15); color: #ff9d5c; }
+.severity-pill--medium { background: rgba(255, 209, 102, 0.15); color: #ffd166; }
+.severity-pill--low { background: rgba(142, 202, 230, 0.15); color: #8ecae6; }
+
+.drift-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #7d8da3;
+}
+
+.drift-row {
+  font-size: 13px;
+  padding: 6px 0;
+  color: #9aabc0;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.drift-row span {
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.drift-row--new span { color: #ff9d5c; }
+.drift-row--resolved span { color: #7ee0c3; }
+
+/* Inner padding for content that now sits inside a GlowPanel */
+.panel-body {
+  padding: 18px 20px;
+}
+
+.path-card-glow {
+  margin-bottom: 16px;
+}
+
+.app-shell__findings .panel-body {
+  padding: 6px 12px 10px;
+}
+
+.app-shell__posture {
+  margin-bottom: 20px;
+}
+
+.app-shell__downloads {
+  display: flex;
+  gap: 6px;
+}
+
+.app-shell__download {
+  background: rgba(126, 224, 195, 0.1);
+  border: 1px solid rgba(126, 224, 195, 0.38);
+  border-radius: 8px;
+  color: #7ee0c3;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.app-shell__download:hover {
+  background: rgba(126, 224, 195, 0.2);
+}
+
+.app-shell__download--ghost {
+  background: none;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #7d8da3;
+}
+
+.app-shell__download--ghost:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e6edf3;
+}

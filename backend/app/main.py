@@ -1,0 +1,155 @@
+"""
+CloudChain FastAPI backend.
+
+Endpoints are simple JSON contracts so the React frontend can render findings,
+the attack-path graph, scan progress, and drift without backend changes.
+
+Run locally:
+    uvicorn app.main:app --reload --port 8000
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from app.config import settings
+from app.jobs import get_job, start_scan
+from app.pipeline import run_scan
+from app.report.generator import build_report
+from app.sources import validate_credentials
+from app.storage import get_scan, list_scans
+
+app = FastAPI(title="CloudChain", version="0.2.0", description="Attack-path-aware CSPM")
+
+# Dev-friendly CORS. Restrict allow_origins to the deployed frontend origin
+# before shipping this anywhere real.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class AWSCredentials(BaseModel):
+    """Credentials submitted from the UI for a real-account scan.
+
+    These are used for the duration of a single scan and then discarded --
+    never persisted to the database, never logged. See app/jobs.py.
+    """
+
+    access_key_id: str = Field(default="", description="AKIA... access key id")
+    secret_access_key: str = Field(default="", description="Secret access key")
+    session_token: str = Field(default="", description="Optional STS session token")
+    region: str = Field(default="us-east-1")
+
+
+class StartScanRequest(BaseModel):
+    mode: str = Field(default="demo", description="'demo' or 'real'")
+    credentials: Optional[AWSCredentials] = None
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "default_mode": settings.default_mode}
+
+
+@app.post("/api/aws/validate")
+def validate_aws(creds: AWSCredentials):
+    """Check a credential pair via STS GetCallerIdentity before scanning, so
+    the UI can show a clear error instead of an empty report."""
+    result = validate_credentials(
+        region=creds.region,
+        access_key_id=creds.access_key_id or None,
+        secret_access_key=creds.secret_access_key or None,
+        session_token=creds.session_token or None,
+    )
+    if not result["valid"]:
+        raise HTTPException(status_code=401, detail=result["error"] or "Invalid AWS credentials")
+    return {"account": result["account"], "arn": result["arn"]}
+
+
+@app.post("/api/scan/start")
+def scan_start(req: StartScanRequest):
+    """Kick off a scan on a worker thread and return a job id to poll."""
+    if req.mode not in ("demo", "real"):
+        raise HTTPException(400, detail="mode must be 'demo' or 'real'")
+
+    creds = req.credentials
+    if req.mode == "real":
+        if not creds or not creds.access_key_id or not creds.secret_access_key:
+            raise HTTPException(400, detail="Real-account scans require an access key id and secret")
+
+        check = validate_credentials(
+            region=creds.region,
+            access_key_id=creds.access_key_id,
+            secret_access_key=creds.secret_access_key,
+            session_token=creds.session_token or None,
+        )
+        if not check["valid"]:
+            raise HTTPException(401, detail=check["error"] or "Invalid AWS credentials")
+
+    job = start_scan(
+        mode=req.mode,
+        region=creds.region if creds else settings.aws_region,
+        access_key_id=creds.access_key_id if creds else None,
+        secret_access_key=creds.secret_access_key if creds else None,
+        session_token=(creds.session_token or None) if creds else None,
+    )
+    return {"job_id": job.job_id, "status": job.status}
+
+
+@app.get("/api/scan/status/{job_id}")
+def scan_status(job_id: str):
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(404, detail="job not found")
+    return job.public_state()
+
+
+@app.post("/api/scan")
+def trigger_scan(mode: str = Query(default=None, description="'demo' or 'real'")):
+    """Synchronous scan. Kept for the CLI/scripting path and for tests; the UI
+    uses the job-based endpoints above."""
+    scan_mode = mode or settings.default_mode
+    if scan_mode not in ("demo", "real"):
+        raise HTTPException(400, detail="mode must be 'demo' or 'real'")
+
+    result, drift = run_scan(mode=scan_mode)
+    return build_report(result, drift)
+
+
+@app.get("/api/scans")
+def scans(mode: Optional[str] = None, limit: int = 20):
+    results = list_scans(mode=mode, limit=limit)
+    return [
+        {"scan_id": s.scan_id, "mode": s.mode, "timestamp": s.timestamp.isoformat(), "summary": s.summary}
+        for s in results
+    ]
+
+
+@app.get("/api/scans/{scan_id}")
+def scan_detail(scan_id: str):
+    result = get_scan(scan_id)
+    if result is None:
+        raise HTTPException(404, detail="scan not found")
+    return result.model_dump()
+
+
+@app.get("/api/scans/{scan_id}/report")
+def scan_report(scan_id: str):
+    result = get_scan(scan_id)
+    if result is None:
+        raise HTTPException(404, detail="scan not found")
+    return build_report(result)
+
+
+@app.get("/api/report/latest")
+def latest_report(mode: str = "demo"):
+    results = list_scans(mode=mode, limit=1)
+    if not results:
+        raise HTTPException(404, detail=f"no scans recorded yet for mode={mode!r}. POST /api/scan first.")
+    return build_report(results[0])

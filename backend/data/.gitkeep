@@ -1,0 +1,1 @@
+# keeps this directory in git; scan snapshots (cloudchain.db) are written here at runtime

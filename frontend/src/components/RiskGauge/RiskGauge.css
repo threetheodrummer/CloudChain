@@ -1,0 +1,110 @@
+.gauge {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 22px 24px;
+  flex-wrap: wrap;
+}
+
+.gauge__dial {
+  position: relative;
+  flex: none;
+  width: 168px;
+  height: 168px;
+}
+
+.gauge__fill {
+  transition: stroke-dasharray 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gauge__center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.gauge__score {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  color: #e6edf3;
+  letter-spacing: -0.02em;
+}
+
+.gauge__outof {
+  font-size: 11px;
+  color: #5f7086;
+  letter-spacing: 0.06em;
+}
+
+.gauge__grade {
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 1px 10px;
+}
+
+.gauge__detail {
+  flex: 1 1 260px;
+  min-width: 240px;
+}
+
+.gauge__detail h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9fb0c3;
+}
+
+.gauge__explain {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #7d8da3;
+}
+
+.gauge__explain code {
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #ff8fa3;
+}
+
+.gauge__deductions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.gauge__deductions li {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 13px;
+  color: #9aabc0;
+}
+
+.gauge__points {
+  flex: none;
+  min-width: 44px;
+  text-align: right;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12.5px;
+  color: #ff8fa3;
+}
+
+.gauge__clean {
+  color: #7ee0c3 !important;
+}
