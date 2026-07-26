@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Wordmark from '../Wordmark/Wordmark';
 import GlowPanel from '../GlowPanel/GlowPanel';
 import RiskGauge from '../RiskGauge/RiskGauge';
@@ -37,8 +38,69 @@ const SeverityChart = ({ bySeverity, total }) => {
   );
 };
 
+/**
+ * A finding row that expands to show the multiplier chain behind its score.
+ *
+ * Ranking findings by a computed number is only useful if the reader can see
+ * why one outranks another -- otherwise it's just a different opaque ordering
+ * than the severity label it replaced.
+ */
+const FindingRow = ({ finding, open, onToggle }) => {
+  const breakdown = finding.score_breakdown || [];
+  const expandable = breakdown.length > 0;
+
+  return (
+    <>
+      <tr
+        className={[
+          finding.in_attack_path ? 'row--chained' : '',
+          expandable ? 'row--expandable' : '',
+          open ? 'row--open' : ''
+        ].join(' ').trim()}
+        onClick={expandable ? onToggle : undefined}
+      >
+        <td>{finding.rank}</td>
+        <td className="cell--score">
+          {expandable && <span className="score-caret">{open ? '▾' : '▸'}</span>}
+          {finding.risk_score}
+        </td>
+        <td>
+          <span className={`severity-pill severity-pill--${finding.severity.toLowerCase()}`}>
+            {finding.severity}
+          </span>
+        </td>
+        <td className="cell--issue">{finding.issue_code}</td>
+        <td className="cell--resource">{finding.resource_id}</td>
+        <td>{finding.in_attack_path ? <span className="chained-flag">on path</span> : ''}</td>
+      </tr>
+
+      {open && (
+        <tr className="row--breakdown">
+          <td colSpan={6}>
+            <div className="breakdown">
+              <span className="breakdown__tag">Score derivation</span>
+              <ol className="breakdown__steps">
+                {breakdown.map((step, i) => (
+                  <li key={i}>
+                    <span className="breakdown__label">{step.label}</span>
+                    <span className="breakdown__detail">{step.detail}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="breakdown__remediation">
+                <strong>Fix:</strong> {finding.remediation}
+              </p>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+};
+
 const Dashboard = ({ report, onNewScan }) => {
   const { summary, attack_paths: attackPaths, top_findings: topFindings, drift, posture, graph } = report;
+  const [openFinding, setOpenFinding] = useState(null);
 
   return (
     <div className="app-shell">
@@ -137,6 +199,7 @@ const Dashboard = ({ report, onNewScan }) => {
 
       <section className="app-shell__findings">
         <h2>Top findings by contextual risk</h2>
+        <p className="app-shell__hint">Click any row to see how its score was calculated.</p>
         <GlowPanel radius={12}>
         <div className="panel-body">
         <table>
@@ -151,20 +214,17 @@ const Dashboard = ({ report, onNewScan }) => {
             </tr>
           </thead>
           <tbody>
-            {topFindings.map((f) => (
-              <tr key={`${f.resource_id}-${f.issue_code}-${f.rank}`} className={f.in_attack_path ? 'row--chained' : ''}>
-                <td>{f.rank}</td>
-                <td className="cell--score">{f.risk_score}</td>
-                <td>
-                  <span className={`severity-pill severity-pill--${f.severity.toLowerCase()}`}>
-                    {f.severity}
-                  </span>
-                </td>
-                <td className="cell--issue">{f.issue_code}</td>
-                <td className="cell--resource">{f.resource_id}</td>
-                <td>{f.in_attack_path ? <span className="chained-flag">on path</span> : ''}</td>
-              </tr>
-            ))}
+            {topFindings.map((f) => {
+              const rowKey = `${f.resource_id}-${f.issue_code}-${f.rank}`;
+              return (
+                <FindingRow
+                  key={rowKey}
+                  finding={f}
+                  open={openFinding === rowKey}
+                  onToggle={() => setOpenFinding(openFinding === rowKey ? null : rowKey)}
+                />
+              );
+            })}
           </tbody>
         </table>
         </div>

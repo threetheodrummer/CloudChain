@@ -32,6 +32,19 @@ def finding_fingerprint(resource_id: str, issue_code: str, dedupe_key: str = "")
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+class ScoreFactor(BaseModel):
+    """One auditable line item in a score calculation.
+
+    Every number CloudChain shows has to be traceable to the findings that
+    produced it. A ScoreFactor is one row of that audit trail: what was
+    counted, why, and how much it moved the number.
+    """
+
+    label: str
+    detail: str
+    contribution: float
+
+
 class Finding(BaseModel):
     resource_id: str
     resource_type: str  # s3_bucket | iam_user | iam_role | security_group
@@ -54,6 +67,9 @@ class ScoredFinding(Finding):
     risk_score: float
     in_attack_path: bool = False
     rank: int = 0
+    # Step-by-step arithmetic behind risk_score, so the UI can show why a
+    # finding outranks another instead of asking the user to trust a number.
+    score_breakdown: List[ScoreFactor] = Field(default_factory=list)
 
 
 class GraphNode(BaseModel):

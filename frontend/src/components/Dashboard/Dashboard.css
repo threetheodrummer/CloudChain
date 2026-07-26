@@ -217,6 +217,98 @@
   color: #e6edf3;
 }
 
+/* --- expandable score derivation ------------------------------------- */
+
+.app-shell__hint {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  color: #5f7086;
+}
+
+.row--expandable {
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.row--expandable:hover {
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.row--open {
+  background: rgba(34, 211, 238, 0.08);
+}
+
+.row--open td {
+  border-bottom-color: transparent;
+}
+
+.score-caret {
+  display: inline-block;
+  width: 12px;
+  color: #22d3ee;
+  font-size: 10px;
+}
+
+.row--breakdown td {
+  padding: 0 10px 14px;
+  background: rgba(34, 211, 238, 0.04);
+}
+
+.breakdown {
+  padding: 12px 14px;
+  border-left: 2px solid rgba(34, 211, 238, 0.5);
+  background: rgba(9, 14, 22, 0.55);
+  border-radius: 0 8px 8px 0;
+}
+
+.breakdown__tag {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #22d3ee;
+  margin-bottom: 8px;
+}
+
+.breakdown__steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.breakdown__steps li {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.breakdown__label {
+  color: #e6edf3;
+  font-weight: 500;
+  margin-right: 8px;
+}
+
+.breakdown__detail {
+  color: #93a4b8;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.breakdown__remediation {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.09);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #93a4b8;
+}
+
+.breakdown__remediation strong {
+  color: #7ee0c3;
+  font-weight: 500;
+}
+
 .cell--issue {
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 12px;

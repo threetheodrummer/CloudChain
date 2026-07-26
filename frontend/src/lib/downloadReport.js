@@ -138,10 +138,35 @@ export function downloadHtml(report) {
     <div><span class="grade">GRADE ${esc(posture.grade)}</span></div>
     <div style="flex:1">
       <ul>
-        ${posture.deductions.map((d) => `<li>&minus;${d.points} &mdash; ${esc(d.reason)}</li>`).join('') || '<li>No deductions.</li>'}
+        ${(posture.components || [])
+          .map(
+            (c) =>
+              `<li>&minus;${c.points_lost.toFixed(1)} of ${c.weight} &mdash; <strong>${esc(c.name)}</strong>: ${esc(c.headline)}</li>`
+          )
+          .join('') || '<li>No deductions.</li>'}
       </ul>
     </div>
   </div>
+
+  ${
+    posture.explanation
+      ? `<p class="sub" style="margin-top:-4px">${esc(posture.explanation)}</p>`
+      : ''
+  }
+
+  <h2>How the score was calculated</h2>
+  <table>
+    <tr><th>Dimension</th><th>Deducted</th><th>Method</th></tr>
+    ${(posture.components || [])
+      .map(
+        (c) => `<tr>
+          <td>${esc(c.name)}</td>
+          <td class="mono">&minus;${c.points_lost.toFixed(2)} / ${c.weight}</td>
+          <td>${esc(c.method)}</td>
+        </tr>`
+      )
+      .join('')}
+  </table>
 
   <h2>Findings by severity</h2>
   <table class="sev"><tr>${sevRow}</tr></table>

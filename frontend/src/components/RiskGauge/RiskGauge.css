@@ -1,9 +1,17 @@
 .gauge {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 28px;
   padding: 22px 24px;
   flex-wrap: wrap;
+}
+
+.gauge__left {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .gauge__dial {
@@ -25,6 +33,7 @@
   align-items: center;
   justify-content: center;
   gap: 1px;
+  pointer-events: none;
 }
 
 .gauge__score {
@@ -51,9 +60,16 @@
   padding: 1px 10px;
 }
 
+.gauge__deducted {
+  margin: 0;
+  font-size: 11.5px;
+  color: #5f7086;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
 .gauge__detail {
-  flex: 1 1 260px;
-  min-width: 240px;
+  flex: 1 1 380px;
+  min-width: 300px;
 }
 
 .gauge__detail h3 {
@@ -65,7 +81,7 @@
 }
 
 .gauge__explain {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   font-size: 13px;
   line-height: 1.6;
   color: #7d8da3;
@@ -79,32 +95,191 @@
   color: #ff8fa3;
 }
 
-.gauge__deductions {
-  list-style: none;
+.gauge__clean {
+  color: #7ee0c3;
+  font-size: 13px;
   margin: 0;
-  padding: 0;
+}
+
+.gauge__dims {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-}
-
-.gauge__deductions li {
-  display: flex;
-  align-items: baseline;
   gap: 9px;
-  font-size: 13px;
-  color: #9aabc0;
 }
 
-.gauge__points {
-  flex: none;
-  min-width: 44px;
-  text-align: right;
+/* --- one dimension ---------------------------------------------------- */
+
+.dim {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 10px 12px 9px;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.dim:hover {
+  border-color: rgba(34, 211, 238, 0.22);
+}
+
+.dim--open {
+  border-color: rgba(34, 211, 238, 0.32);
+  background: rgba(34, 211, 238, 0.035);
+}
+
+.dim__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dim__chevron {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+}
+
+.dim__name {
+  flex: 0 0 100px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #e6edf3;
+}
+
+.dim__bar {
+  flex: 1 1 auto;
+  height: 6px;
+  min-width: 40px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.dim__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dim__points {
+  flex: 0 0 auto;
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 12.5px;
-  color: #ff8fa3;
+  font-weight: 600;
+  min-width: 74px;
+  text-align: right;
 }
 
-.gauge__clean {
-  color: #7ee0c3 !important;
+.dim__points em {
+  font-style: normal;
+  font-weight: 400;
+  color: #5f7086;
+}
+
+.dim__headline {
+  margin: 7px 0 0 26px;
+  font-size: 12.5px;
+  color: #93a4b8;
+  line-height: 1.45;
+}
+
+/* --- expanded --------------------------------------------------------- */
+
+.dim__detail {
+  margin: 12px 0 2px 26px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.09);
+}
+
+.dim__tag {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #22d3ee;
+  margin-bottom: 5px;
+}
+
+.dim__method {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #b6c4d4;
+}
+
+.dim__math {
+  margin: 0;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  color: #7ee0c3;
+}
+
+.dim__factors {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.dim__factors th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #5f7086;
+  padding: 0 10px 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dim__factors th:last-child,
+.dim__factor-value {
+  text-align: right;
+  padding-right: 0;
+}
+
+.dim__factors td {
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: top;
+}
+
+.dim__factor-label {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11.5px;
+  color: #e6edf3;
+  white-space: nowrap;
+}
+
+.dim__factor-detail {
+  color: #93a4b8;
+  line-height: 1.45;
+}
+
+.dim__factor-value {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: #ffd166;
+  white-space: nowrap;
+}
+
+.dim__empty {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #5f7086;
+  font-style: italic;
 }

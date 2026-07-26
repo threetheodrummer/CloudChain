@@ -23,11 +23,15 @@ def _finding_dict(f) -> Dict[str, Any]:
         "title": f.title,
         "description": f.description,
         "remediation": f.remediation,
+        # The multiplier chain behind risk_score, so the UI can defend the ranking.
+        "score_breakdown": [sf.model_dump() for sf in f.score_breakdown],
     }
 
 
 def build_report(scan: ScanResult, drift: Optional[DriftReport] = None) -> Dict[str, Any]:
-    posture = compute_posture(scan.findings, scan.attack_paths)
+    # The graph is passed through so the posture engine can measure blast radius
+    # (how much of the estate an attacker reaches from the exposed entry points).
+    posture = compute_posture(scan.findings, scan.attack_paths, scan.graph)
 
     return {
         "scan_id": scan.scan_id,
