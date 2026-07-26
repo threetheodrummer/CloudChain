@@ -11,11 +11,28 @@ from app.models import DriftReport, ScanResult
 from app.risk import compute_posture
 
 
+def _account_rollup(scan: ScanResult):
+    """(account_id, account_name, finding_count), worst-hit account first."""
+    counts: Dict[str, int] = {}
+    names: Dict[str, str] = {}
+    for f in scan.findings:
+        if not f.account_id:
+            continue
+        counts[f.account_id] = counts.get(f.account_id, 0) + 1
+        names[f.account_id] = f.account_name or f.account_id
+    return [
+        (aid, names[aid], n)
+        for aid, n in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+
 def _finding_dict(f) -> Dict[str, Any]:
     return {
         "rank": f.rank,
         "risk_score": f.risk_score,
         "in_attack_path": f.in_attack_path,
+        "account_id": f.account_id,
+        "account_name": f.account_name,
         "severity": f.base_severity.value,
         "issue_code": f.issue_code,
         "resource_id": f.resource_id,
@@ -38,10 +55,16 @@ def build_report(scan: ScanResult, drift: Optional[DriftReport] = None) -> Dict[
         "mode": scan.mode,
         "timestamp": scan.timestamp.isoformat(),
         "posture": posture,
+        "accounts": [
+            {"id": aid, "name": name, "findings": count}
+            for aid, name, count in _account_rollup(scan)
+        ],
         "summary": {
             "total_findings": len(scan.findings),
             "by_severity": scan.summary,
             "attack_paths_found": len(scan.attack_paths),
+            "accounts_scanned": len({f.account_id for f in scan.findings if f.account_id}),
+            "cross_account_paths": sum(1 for p in scan.attack_paths if p.crosses_accounts),
         },
         "attack_paths": [
             {
@@ -50,6 +73,8 @@ def build_report(scan: ScanResult, drift: Optional[DriftReport] = None) -> Dict[
                 "narrative": p.narrative,
                 "steps": p.steps,
                 "node_ids": p.node_ids,
+                "crosses_accounts": p.crosses_accounts,
+                "accounts": p.accounts,
             }
             for p in scan.attack_paths
         ],

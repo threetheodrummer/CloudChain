@@ -40,9 +40,9 @@ data source breaks the build.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-from app.graph.attack_graph import ADMIN_SINK
+from app.graph.attack_graph import is_admin_sink, parse_node
 from app.models import (
     AttackPath,
     EvidenceCall,
@@ -66,14 +66,15 @@ READ_ONLY_METHODS = frozenset(
         "list_object_keys",
         "list_user_policy_names",
         "list_role_policy_names",
+        "list_role_trust_principals",
         "get_policy_statements",
     }
 )
 
 
 def _split_node(node: str) -> Tuple[str, str]:
-    """'s3_bucket:my-bucket' -> ('s3_bucket', 'my-bucket')."""
-    kind, _, name = node.partition(":")
+    """('s3_bucket', 'my-bucket'), dropping the account namespace."""
+    _, kind, name = parse_node(node)
     return kind, name
 
 
@@ -248,6 +249,61 @@ def _verify_pass_role(
     )
 
 
+def _verify_cross_account_trust(
+    source: AWSDataSource, principal_node: str, role_node: str
+) -> Tuple[VerdictStatus, str, List[EvidenceCall]]:
+    """External principal -> role: the role's trust policy still names it.
+
+    `source` must be the account that *owns the role*, since the trust policy
+    is a property of the role, not of the principal being trusted.
+    """
+    src_account, src_kind, src_name = parse_node(principal_node)
+    role_account, _, role = parse_node(role_node)
+    calls: List[EvidenceCall] = []
+
+    principals = source.list_role_trust_principals(role)
+    calls.append(
+        EvidenceCall(
+            api="iam:GetRole",
+            request=f"RoleName={role}",
+            observed=(
+                f"AssumeRolePolicyDocument trusts: "
+                f"{', '.join(principals) if principals else 'no IAM principals'}"
+            ),
+            cli=f"aws iam get-role --role-name {role} "
+            f"--query 'Role.AssumeRolePolicyDocument'",
+        )
+    )
+
+    if not principals:
+        return (
+            VerdictStatus.REFUTED,
+            f"Role '{role}' in {role_account} no longer trusts any external IAM principal.",
+            calls,
+        )
+
+    expected = f":{'user' if src_kind == 'iam_user' else 'role'}/{src_name}"
+    matched = [p for p in principals if p.endswith(expected) and src_account in p]
+
+    if not matched:
+        return (
+            VerdictStatus.REFUTED,
+            f"Role '{role}' in {role_account} is still assumable, but no longer by "
+            f"'{src_name}' in {src_account}.",
+            calls,
+        )
+
+    return (
+        VerdictStatus.CONFIRMED,
+        (
+            f"The trust policy on '{role}' in account {role_account} explicitly names "
+            f"{matched[0]}, so compromising '{src_name}' in account {src_account} crosses "
+            f"the boundary via sts:AssumeRole. No role was assumed."
+        ),
+        calls,
+    )
+
+
 def _verify_admin_grant(
     source: AWSDataSource, node: str
 ) -> Tuple[VerdictStatus, str, List[EvidenceCall]]:
@@ -316,6 +372,7 @@ _CLAIMS = {
     "leaks_credentials_for": "A publicly readable object in {src} leaks credentials for {tgt}",
     "can_pass_role_to": "{src} can pass the role {tgt} into new compute and run code as it",
     "can_pass_role_to (wildcard)": "{src} holds unscoped iam:PassRole and can pass any role, including {tgt}",
+    "can_assume_cross_account": "{src} is named in the trust policy of {tgt} and can cross the account boundary",
     "grants_admin_access": "{src} is granted AdministratorAccess",
     "has_admin_policy": "{src} directly holds an unrestricted (*:*) policy",
 }
@@ -327,25 +384,70 @@ def _relation_map(graph: Optional[ScanGraph]) -> Dict[Tuple[str, str], str]:
     return {(e.source, e.target): e.relation for e in graph.edges}
 
 
+Sources = Union[AWSDataSource, Mapping[str, AWSDataSource], Sequence[AWSDataSource]]
+
+
+def _index_sources(sources: Sources) -> Tuple[Dict[str, AWSDataSource], Optional[AWSDataSource]]:
+    """Normalise however the caller supplied sources into {account_id: source}.
+
+    A cross-account path can only be verified if each hop is checked against
+    the account that actually owns the resource -- a trust policy lives with
+    the role, not with the principal being trusted.
+    """
+    if isinstance(sources, Mapping):
+        by_account = dict(sources)
+    elif isinstance(sources, AWSDataSource):
+        by_account = {sources.account_id: sources}
+    else:
+        by_account = {s.account_id: s for s in sources}
+
+    default = next(iter(by_account.values()), None)
+    return by_account, default
+
+
 def validate_path(
     path: AttackPath,
-    source: AWSDataSource,
+    sources: Sources,
     graph: Optional[ScanGraph] = None,
 ) -> PathValidation:
-    """Re-check every hop of one attack path using read-only API calls."""
+    """Re-check every hop of one attack path using read-only API calls.
+
+    `sources` may be a single data source, a sequence of them, or a mapping
+    keyed by account id. Hops are routed to the account that owns the resource
+    being checked.
+    """
+    by_account, default_source = _index_sources(sources)
     relations = _relation_map(graph)
     hops: List[HopVerification] = []
+
+    def source_for(node: str) -> Optional[AWSDataSource]:
+        account, _, _ = parse_node(node)
+        return by_account.get(account, default_source if not account else by_account.get(account))
 
     for i in range(len(path.node_ids) - 1):
         src, tgt = path.node_ids[i], path.node_ids[i + 1]
         relation = relations.get((src, tgt), "unknown")
-        src_kind, src_name = _split_node(src)
-        tgt_kind, tgt_name = _split_node(tgt)
+        src_account, src_kind, src_name = parse_node(src)
+        tgt_account, tgt_kind, tgt_name = parse_node(tgt)
 
-        if relation == "leaks_credentials_for":
+        # The trust-policy check belongs to the account owning the *target*
+        # role; every other check belongs to the source resource's account.
+        owner = tgt if relation == "can_assume_cross_account" else src
+        source = source_for(owner)
+
+        if source is None:
+            status, reason, calls = (
+                VerdictStatus.UNVERIFIABLE,
+                f"No credentials were supplied for account {parse_node(owner)[0]}, so this "
+                f"hop could not be re-checked.",
+                [],
+            )
+        elif relation == "leaks_credentials_for":
             status, reason, calls = _verify_leaked_credentials(source, src_name, tgt_name)
         elif relation.startswith("can_pass_role_to"):
             status, reason, calls = _verify_pass_role(source, src_name, tgt_name)
+        elif relation == "can_assume_cross_account":
+            status, reason, calls = _verify_cross_account_trust(source, src, tgt)
         elif relation in ("grants_admin_access", "has_admin_policy"):
             status, reason, calls = _verify_admin_grant(source, src)
         else:
@@ -355,9 +457,16 @@ def validate_path(
                 [],
             )
 
+        def label(account: str, kind: str, name: str) -> str:
+            where = f" in {account}" if account else ""
+            return f"{kind} '{name}'{where}"
+
         claim = _CLAIMS.get(relation, "{src} -> {tgt}").format(
-            src=f"{src_kind} '{src_name}'",
-            tgt="AdministratorAccess" if tgt == ADMIN_SINK else f"{tgt_kind} '{tgt_name}'",
+            src=label(src_account, src_kind, src_name),
+            tgt=(
+                f"AdministratorAccess in {tgt_account}" if is_admin_sink(tgt)
+                else label(tgt_account, tgt_kind, tgt_name)
+            ),
         )
 
         hops.append(
@@ -409,7 +518,7 @@ def validate_path(
 
 def validate_paths(
     paths: Sequence[AttackPath],
-    source: AWSDataSource,
+    sources: Sources,
     graph: Optional[ScanGraph] = None,
 ) -> List[PathValidation]:
-    return [validate_path(p, source, graph) for p in paths]
+    return [validate_path(p, sources, graph) for p in paths]

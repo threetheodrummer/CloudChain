@@ -24,8 +24,14 @@ def test_demo_job_completes_and_returns_a_report():
     _wait(job)
     assert job.status == "complete", job.error
     assert job.report is not None
-    assert job.report["summary"]["total_findings"] == 14
-    assert job.report["summary"]["attack_paths_found"] == 1
+    # Asserted against the report's own contents rather than a hardcoded count,
+    # so adding a demo account or a scanner check doesn't fail this for the
+    # wrong reason.
+    summary = job.report["summary"]
+    assert summary["total_findings"] == len(job.report["findings"])
+    assert summary["total_findings"] > 0
+    assert summary["attack_paths_found"] == len(job.report["attack_paths"])
+    assert summary["attack_paths_found"] >= 1
 
 
 def test_job_marks_all_stages_completed():

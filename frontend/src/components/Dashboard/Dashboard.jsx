@@ -5,7 +5,7 @@ import RiskGauge from '../RiskGauge/RiskGauge';
 import AttackGraph from '../AttackGraph/AttackGraph';
 import PathValidation from '../PathValidation/PathValidation';
 import { validateScanPaths } from '../../api/client';
-import { downloadHtml, downloadJson } from '../../lib/downloadReport';
+import { downloadHtml } from '../../lib/downloadReport';
 import './Dashboard.css';
 
 const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
@@ -73,12 +73,17 @@ const FindingRow = ({ finding, open, onToggle }) => {
         </td>
         <td className="cell--issue">{finding.issue_code}</td>
         <td className="cell--resource">{finding.resource_id}</td>
+        <td className="cell--account">
+          {finding.account_name && (
+            <span className="account-pill" title={finding.account_id}>{finding.account_name}</span>
+          )}
+        </td>
         <td>{finding.in_attack_path ? <span className="chained-flag">on path</span> : ''}</td>
       </tr>
 
       {open && (
         <tr className="row--breakdown">
-          <td colSpan={6}>
+          <td colSpan={7}>
             <div className="breakdown">
               <span className="breakdown__tag">Score derivation</span>
               <ol className="breakdown__steps">
@@ -139,9 +144,6 @@ const Dashboard = ({ report, onNewScan }) => {
             <button type="button" className="app-shell__download" onClick={() => downloadHtml(report)}>
               Download report
             </button>
-            <button type="button" className="app-shell__download app-shell__download--ghost" onClick={() => downloadJson(report)}>
-              JSON
-            </button>
           </div>
           <button type="button" className="app-shell__new-scan" onClick={onNewScan}>
             New scan
@@ -165,8 +167,26 @@ const Dashboard = ({ report, onNewScan }) => {
         <GlowPanel tone="danger" radius={12} glowRadius={26}>
           <div className="summary-card summary-card--wide summary-card--paths">
             <span className="summary-card__value">{summary.attack_paths_found}</span>
-            <span className="summary-card__label">Attack paths to admin</span>
+            <span className="summary-card__label">
+              Attack paths to admin
+              {summary.cross_account_paths > 0 && (
+                <em className="summary-card__note">
+                  {summary.cross_account_paths} cross accounts
+                </em>
+              )}
+            </span>
           </div>
+          {summary.accounts_scanned > 1 && (
+            <div className="summary-card summary-card--wide">
+              <span className="summary-card__value">{summary.accounts_scanned}</span>
+              <span className="summary-card__label">
+                Accounts scanned
+                <em className="summary-card__note">
+                  {(report.accounts || []).map((a) => a.name).join(' · ')}
+                </em>
+              </span>
+            </div>
+          )}
         </GlowPanel>
         {drift && (
           <>
@@ -201,7 +221,14 @@ const Dashboard = ({ report, onNewScan }) => {
           {attackPaths.map((p) => (
             <GlowPanel tone="danger" radius={12} key={p.path_id} className="path-card-glow">
             <div className="path-card">
-              <span className="path-card__severity">{p.severity}</span>
+              <div className="path-card__tags">
+                <span className="path-card__severity">{p.severity}</span>
+                {p.crosses_accounts && (
+                  <span className="path-card__cross" title={(p.accounts || []).join(' → ')}>
+                    crosses {(p.accounts || []).length} accounts
+                  </span>
+                )}
+              </div>
               <ol className="path-card__steps">
                 {p.steps.map((step, i) => (
                   <li key={i}>{step}</li>
@@ -241,6 +268,7 @@ const Dashboard = ({ report, onNewScan }) => {
               <th>Severity</th>
               <th>Issue</th>
               <th>Resource</th>
+              <th>Account</th>
               <th>Chained</th>
             </tr>
           </thead>

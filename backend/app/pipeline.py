@@ -19,7 +19,7 @@ from app.graph import build_attack_graph, find_attack_paths, finding_ids_on_path
 from app.models import DriftReport, Finding, ScanResult
 from app.risk import score_findings
 from app.scanners import IAMScanner, S3Scanner, SecurityGroupScanner
-from app.sources import get_data_source
+from app.sources import get_data_sources
 from app.storage import compare_scans, get_previous_scan, save_scan
 
 # (stage_id, human-readable label) in execution order. The frontend renders
@@ -68,26 +68,43 @@ def run_scan(
             time.sleep(stage_delay)
 
     stage("connect", f"mode={mode}")
-    source = get_data_source(
+    sources = get_data_sources(
         mode,
         region=region,
         access_key_id=access_key_id,
         secret_access_key=secret_access_key,
         session_token=session_token,
     )
+    account_label = ", ".join(s.account_name or s.account_id or "unknown" for s in sources)
 
     findings: List[Finding] = []
 
-    stage("s3", "checking public access, encryption, versioning, exposed objects")
-    findings.extend(S3Scanner(source).scan())
+    def collect(scanner_cls, source) -> List[Finding]:
+        """Run one scanner and stamp its findings with the account they came from.
 
-    stage("iam", "checking MFA, stale keys, wildcard grants, PassRole escalation")
-    findings.extend(IAMScanner(source).scan())
+        Stamping centrally rather than in each scanner keeps the account
+        dimension out of a dozen Finding(...) call sites, and guarantees no
+        scanner can forget to attribute a finding.
+        """
+        out = scanner_cls(source).scan()
+        for f in out:
+            f.account_id = source.account_id
+            f.account_name = source.account_name
+        return out
+
+    stage("s3", f"checking public access, encryption, versioning, exposed objects across {account_label}")
+    for source in sources:
+        findings.extend(collect(S3Scanner, source))
+
+    stage("iam", "checking MFA, stale keys, wildcard grants, PassRole escalation, cross-account trust")
+    for source in sources:
+        findings.extend(collect(IAMScanner, source))
 
     stage("ec2", "checking ingress rules open to 0.0.0.0/0")
-    findings.extend(SecurityGroupScanner(source).scan())
+    for source in sources:
+        findings.extend(collect(SecurityGroupScanner, source))
 
-    stage("graph", f"{len(findings)} findings collected")
+    stage("graph", f"{len(findings)} findings across {len(sources)} account(s)")
     graph, findings_by_resource = build_attack_graph(findings)
     attack_paths = find_attack_paths(graph, findings_by_resource)
     ids_in_path = finding_ids_on_paths(attack_paths, findings_by_resource)

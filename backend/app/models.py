@@ -19,7 +19,9 @@ class Severity(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-def finding_fingerprint(resource_id: str, issue_code: str, dedupe_key: str = "") -> str:
+def finding_fingerprint(
+    resource_id: str, issue_code: str, dedupe_key: str = "", account_id: str = ""
+) -> str:
     """Stable identity for a finding, used for drift diffing across scans.
 
     dedupe_key exists because a single resource can have multiple distinct
@@ -27,8 +29,15 @@ def finding_fingerprint(resource_id: str, issue_code: str, dedupe_key: str = "")
     one security group, or two access keys on one IAM user) -- without it
     those would collide into a single fingerprint and silently disappear
     from drift tracking.
+
+    account_id is part of the identity for the same reason. Resource names are
+    only unique within an account: every account has an "account" pseudo-
+    resource for its password policy, and role names like "OrgDeploymentRole"
+    are routinely duplicated across an org. Without the account in the hash,
+    two real findings in two accounts collapse into one and drift quietly
+    under-reports.
     """
-    raw = f"{resource_id}:{issue_code}:{dedupe_key}".encode("utf-8")
+    raw = f"{account_id}:{resource_id}:{issue_code}:{dedupe_key}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
@@ -46,6 +55,11 @@ class ScoreFactor(BaseModel):
 
 
 class Finding(BaseModel):
+    # Account this resource lives in. Empty for single-account scans where the
+    # id couldn't be resolved; the graph then behaves exactly as it did before
+    # accounts existed.
+    account_id: str = ""
+    account_name: str = ""
     resource_id: str
     resource_type: str  # s3_bucket | iam_user | iam_role | security_group
     issue_code: str
@@ -60,7 +74,9 @@ class Finding(BaseModel):
 
     @property
     def id(self) -> str:
-        return finding_fingerprint(self.resource_id, self.issue_code, self.dedupe_key)
+        return finding_fingerprint(
+            self.resource_id, self.issue_code, self.dedupe_key, self.account_id
+        )
 
 
 class ScoredFinding(Finding):
@@ -91,6 +107,10 @@ class AttackPath(BaseModel):
     steps: List[str]  # human-readable narrative steps, one per hop
     severity: Severity
     narrative: str
+    # A chain spanning more than one account is strictly worse: no single
+    # account's configuration reveals it, so per-account tooling cannot see it.
+    crosses_accounts: bool = False
+    accounts: List[str] = Field(default_factory=list)
 
 
 class ScanGraph(BaseModel):

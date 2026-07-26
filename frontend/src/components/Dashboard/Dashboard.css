@@ -217,6 +217,52 @@
   color: #e6edf3;
 }
 
+/* --- accounts --------------------------------------------------------- */
+
+.account-pill {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: #8ecae6;
+  border: 1px solid rgba(142, 202, 230, 0.34);
+  background: rgba(142, 202, 230, 0.08);
+  white-space: nowrap;
+}
+
+.cell--account {
+  white-space: nowrap;
+}
+
+.summary-card__note {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 11px;
+  color: #ffd166;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.path-card__tags {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.path-card__cross {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #ffd166;
+  border: 1px solid rgba(255, 209, 102, 0.45);
+  background: rgba(255, 209, 102, 0.08);
+  border-radius: 999px;
+  padding: 3px 11px;
+}
+
 /* --- expandable score derivation ------------------------------------- */
 
 .app-shell__hint {
@@ -398,13 +444,3 @@
   background: rgba(126, 224, 195, 0.2);
 }
 
-.app-shell__download--ghost {
-  background: none;
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #7d8da3;
-}
-
-.app-shell__download--ghost:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #e6edf3;
-}

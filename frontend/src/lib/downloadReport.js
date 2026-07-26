@@ -1,10 +1,15 @@
 /**
- * Report export helpers.
+ * Report export.
  *
- * Both formats are generated from the same report object the dashboard is
- * rendering, so a downloaded file can never disagree with what's on screen.
- * The HTML export is fully self-contained (inline CSS, no external assets) so
- * it opens correctly from disk and prints/saves to PDF cleanly.
+ * Generated from the same report object the dashboard is rendering, so a
+ * downloaded file can never disagree with what's on screen. The HTML export is
+ * fully self-contained (inline CSS, no external assets) so it opens correctly
+ * from disk and prints/saves to PDF cleanly.
+ *
+ * Raw JSON is deliberately not offered as a download: the API already serves
+ * it at /api/scans/{scan_id}/report for anyone scripting against CloudChain,
+ * and a second button on the dashboard only added noise for readers who want
+ * the readable artefact.
  */
 
 function triggerDownload(blob, filename) {
@@ -23,11 +28,6 @@ function stamp(report) {
   const d = new Date(report.timestamp);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
-}
-
-export function downloadJson(report) {
-  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-  triggerDownload(blob, `cloudchain-${report.scan_id}-${stamp(report)}.json`);
 }
 
 const esc = (s) =>
@@ -141,7 +141,7 @@ export function downloadHtml(report) {
         ${(posture.components || [])
           .map(
             (c) =>
-              `<li>&minus;${c.points_lost.toFixed(1)} of ${c.weight} &mdash; <strong>${esc(c.name)}</strong>: ${esc(c.headline)}</li>`
+              `<li>${c.points_lost.toFixed(1)} of ${c.weight} &mdash; <strong>${esc(c.name)}</strong>: ${esc(c.headline)}</li>`
           )
           .join('') || '<li>No deductions.</li>'}
       </ul>
@@ -161,7 +161,7 @@ export function downloadHtml(report) {
       .map(
         (c) => `<tr>
           <td>${esc(c.name)}</td>
-          <td class="mono">&minus;${c.points_lost.toFixed(2)} / ${c.weight}</td>
+          <td class="mono">${c.points_lost.toFixed(2)} / ${c.weight}</td>
           <td>${esc(c.method)}</td>
         </tr>`
       )

@@ -43,7 +43,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 import networkx as nx
 
-from app.graph.attack_graph import ADMIN_SINK, node_id
+from app.graph.attack_graph import is_admin_sink, node_id
 from app.models import AttackPath, ScanGraph, ScoredFinding, Severity
 
 # --------------------------------------------------------------------------
@@ -88,8 +88,10 @@ PRIVILEGE_ISSUE_WEIGHTS: Dict[str, float] = {
 PRIVILEGE_SATURATION = 40.0
 
 # Reachability is scored from the existence and shape of confirmed paths.
-REACHABILITY_PATH_EXISTS = 0.70  # any proven route to admin
-REACHABILITY_SHORT_CHAIN = 0.20  # shortest route is <= SHORT_CHAIN_HOPS
+# The four terms sum to exactly 1.00 at worst case.
+REACHABILITY_PATH_EXISTS = 0.60  # any proven route to admin
+REACHABILITY_CROSS_ACCOUNT = 0.15  # at least one chain spans two accounts
+REACHABILITY_SHORT_CHAIN = 0.15  # shortest route is <= SHORT_CHAIN_HOPS
 REACHABILITY_MULTI_PATH = 0.10  # several independent routes
 SHORT_CHAIN_HOPS = 2
 MULTI_PATH_SATURATION = 3  # 3+ distinct paths saturates this term
@@ -248,6 +250,19 @@ def _reachability(attack_paths: Sequence[AttackPath]) -> Dict[str, Any]:
         )
     ]
 
+    crossing = [p for p in attack_paths if p.crosses_accounts]
+    if crossing:
+        raw += REACHABILITY_CROSS_ACCOUNT
+        involved = sorted({a for p in crossing for a in p.accounts})
+        factors.append(
+            _factor(
+                "Crosses an account boundary",
+                f"{len(crossing)} chain(s) span {len(involved)} accounts "
+                f"({', '.join(involved)}); no single account's configuration reveals this",
+                REACHABILITY_CROSS_ACCOUNT,
+            )
+        )
+
     hops = min(max(len(p.node_ids) - 1, 1) for p in attack_paths)
     if hops <= SHORT_CHAIN_HOPS:
         raw += REACHABILITY_SHORT_CHAIN
@@ -282,9 +297,14 @@ def _reachability(attack_paths: Sequence[AttackPath]) -> Dict[str, Any]:
         "reachability",
         "Reachability",
         raw,
-        f"{len(attack_paths)} confirmed path(s) to AdministratorAccess; shortest is {hops} hop(s).",
+        (
+            f"{len(attack_paths)} confirmed path(s) to AdministratorAccess; shortest is "
+            f"{hops} hop(s)"
+            + (f"; {len(crossing)} cross an account boundary." if crossing else ".")
+        ),
         (
             f"A proven route to admin sets a floor of {REACHABILITY_PATH_EXISTS:.2f}. Add "
+            f"{REACHABILITY_CROSS_ACCOUNT:.2f} if any chain spans more than one account, "
             f"{REACHABILITY_SHORT_CHAIN:.2f} if the shortest chain is {SHORT_CHAIN_HOPS} hops "
             f"or fewer, and up to {REACHABILITY_MULTI_PATH:.2f} for multiple independent "
             f"routes (saturating at {MULTI_PATH_SATURATION} paths). "
@@ -303,7 +323,7 @@ def _entry_nodes(findings: Sequence[ScoredFinding]) -> Set[str]:
     """Same entry-point rule the graph engine uses: a resource is an entry
     point when it has a finding that is both internet-facing and sensitive."""
     return {
-        node_id(f.resource_type, f.resource_id)
+        node_id(f.resource_type, f.resource_id, f.account_id)
         for f in findings
         if f.internet_facing and f.sensitive
     }
@@ -341,9 +361,10 @@ def _blast_radius(
             [],
         )
 
-    # The synthetic admin sink is an outcome, not a resource an attacker
-    # "reaches" -- excluding it keeps the denominator honest.
-    real_nodes = {n for n in g.nodes if n != ADMIN_SINK}
+    # The synthetic admin sinks are outcomes, not resources an attacker
+    # "reaches" -- excluding them keeps the denominator honest. There is one
+    # per account, so this filters by kind rather than by a single node id.
+    real_nodes = {n for n in g.nodes if not is_admin_sink(n)}
     total = len(real_nodes)
 
     entries = _entry_nodes(findings) & set(g.nodes)

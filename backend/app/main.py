@@ -19,7 +19,7 @@ from app.config import settings
 from app.jobs import get_job, start_scan
 from app.pipeline import run_scan
 from app.report.generator import build_report
-from app.sources import get_data_source, validate_credentials
+from app.sources import get_data_sources, validate_credentials
 from app.storage import get_scan, list_scans
 from app.validation import validate_paths
 
@@ -184,7 +184,9 @@ def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
         if not check["valid"]:
             raise HTTPException(401, detail=check["error"] or "Invalid AWS credentials")
 
-    source = get_data_source(
+    # One source per account, so a chain that crosses an org boundary can have
+    # each hop checked against the account that actually owns the resource.
+    sources = get_data_sources(
         result.mode,
         region=creds.region if creds else settings.aws_region,
         access_key_id=creds.access_key_id if creds else None,
@@ -192,7 +194,7 @@ def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
         session_token=(creds.session_token or None) if creds else None,
     )
 
-    validations = validate_paths(result.attack_paths, source, result.graph)
+    validations = validate_paths(result.attack_paths, sources, result.graph)
     return {
         "scan_id": scan_id,
         "mode": result.mode,

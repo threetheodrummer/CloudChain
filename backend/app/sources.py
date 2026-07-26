@@ -17,7 +17,20 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger("cloudchain.sources")
 
 
+def _as_list(value: Any) -> List[Any]:
+    """AWS policy documents use a bare string where a list of one is meant."""
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
 class AWSDataSource(ABC):
+    # Identity of the account this source reads from. Findings are stamped with
+    # it so the graph can tell same-account escalation apart from a chain that
+    # crosses an organisation boundary.
+    account_id: str = ""
+    account_name: str = ""
+
     # --- S3 ---
     @abstractmethod
     def list_buckets(self) -> List[str]: ...
@@ -65,6 +78,16 @@ class AWSDataSource(ABC):
     @abstractmethod
     def list_role_policy_names(self, role: str) -> List[str]: ...
 
+    def list_role_trust_principals(self, role: str) -> List[str]:
+        """Principal ARNs allowed to assume this role by its trust policy.
+
+        Service principals (lambda.amazonaws.com and friends) are excluded --
+        only IAM principals, which is what can carry an attacker across an
+        account boundary. Concrete, non-abstract default so a data source that
+        can't answer this degrades to "no external trust" rather than breaking.
+        """
+        return []
+
     @abstractmethod
     def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
         """Return a flattened list of (action, resource) pairs granted (Allow
@@ -80,14 +103,27 @@ class AWSDataSource(ABC):
 
 
 class DemoAWSDataSource(AWSDataSource):
-    """Reads from the seeded synthetic account in app/demo/mock_aws.py."""
+    """Reads one account of the seeded synthetic org in app/demo/mock_aws.py.
 
-    def __init__(self):
+    Defaults to the primary (prod) account so single-account callers and the
+    existing tests behave exactly as before; pass an account_id to read one of
+    the other org members.
+    """
+
+    def __init__(self, account_id: Optional[str] = None):
         from app.demo import mock_aws
+
         self._m = mock_aws
-        self._buckets = {b["name"]: b for b in mock_aws.BUCKETS}
-        self._users = {u["name"]: u for u in mock_aws.IAM_USERS}
-        self._roles = {r["name"]: r for r in mock_aws.IAM_ROLES}
+        account = (
+            mock_aws.ACCOUNTS_BY_ID[account_id] if account_id else mock_aws.PRIMARY_ACCOUNT
+        )
+        self._account = account
+        self.account_id = account["id"]
+        self.account_name = account["name"]
+        self._policies = account["policies"]
+        self._buckets = {b["name"]: b for b in account["buckets"]}
+        self._users = {u["name"]: u for u in account["users"]}
+        self._roles = {r["name"]: r for r in account["roles"]}
 
     def list_buckets(self) -> List[str]:
         return list(self._buckets.keys())
@@ -131,14 +167,17 @@ class DemoAWSDataSource(AWSDataSource):
     def list_role_policy_names(self, role: str) -> List[str]:
         return list(self._roles[role]["attached_policies"])
 
+    def list_role_trust_principals(self, role: str) -> List[str]:
+        return list(self._roles[role].get("trust_principals", []))
+
     def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
-        return list(self._m.IAM_POLICY_DOCUMENTS.get(policy_name, []))
+        return list(self._policies.get(policy_name, []))
 
     def get_account_password_policy(self) -> Dict[str, Any]:
-        return dict(self._m.ACCOUNT_PASSWORD_POLICY)
+        return dict(self._account["password_policy"])
 
     def list_security_groups(self) -> List[Dict[str, Any]]:
-        return [dict(sg) for sg in self._m.SECURITY_GROUPS]
+        return [dict(sg) for sg in self._account["security_groups"]]
 
 
 class RealAWSDataSource(AWSDataSource):
@@ -179,6 +218,13 @@ class RealAWSDataSource(AWSDataSource):
         self._s3 = session.client("s3")
         self._iam = session.client("iam")
         self._ec2 = session.client("ec2")
+
+        # Resolve the account id once so findings can be attributed. A failure
+        # here is non-fatal: the scan still runs, findings are just unattributed.
+        self.account_id = self._safe(
+            lambda: session.client("sts").get_caller_identity().get("Account", ""), ""
+        )
+        self.account_name = self.account_id
 
     @staticmethod
     def _safe(fn, default):
@@ -338,6 +384,27 @@ class RealAWSDataSource(AWSDataSource):
 
         return self._safe(call, [])
 
+    def list_role_trust_principals(self, role: str) -> List[str]:
+        def call():
+            doc = self._iam.get_role(RoleName=role)["Role"]["AssumeRolePolicyDocument"]
+            statements = doc.get("Statement", [])
+            statements = statements if isinstance(statements, list) else [statements]
+
+            principals: List[str] = []
+            for stmt in statements:
+                if stmt.get("Effect") != "Allow":
+                    continue
+                if "sts:AssumeRole" not in _as_list(stmt.get("Action", [])):
+                    continue
+                # Only IAM principals matter here. A Service principal
+                # (lambda.amazonaws.com) can't carry an attacker across an
+                # account boundary, so it is deliberately not collected.
+                aws = stmt.get("Principal", {}).get("AWS")
+                principals.extend(_as_list(aws))
+            return principals
+
+        return self._safe(call, [])
+
     def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
         """Best-effort resolution: tries AWS-managed policy by name first,
         since that covers the common escalation-relevant policies (e.g.
@@ -466,6 +533,7 @@ def get_data_source(
     secret_access_key: Optional[str] = None,
     session_token: Optional[str] = None,
 ) -> AWSDataSource:
+    """A single data source. Demo mode returns the primary account."""
     if mode == "demo":
         return DemoAWSDataSource()
     if mode == "real":
@@ -476,3 +544,34 @@ def get_data_source(
             session_token=session_token,
         )
     raise ValueError(f"Unknown mode: {mode!r} (expected 'demo' or 'real')")
+
+
+def get_data_sources(
+    mode: str,
+    region: str = "us-east-1",
+    access_key_id: Optional[str] = None,
+    secret_access_key: Optional[str] = None,
+    session_token: Optional[str] = None,
+) -> List[AWSDataSource]:
+    """Every account a scan should cover.
+
+    Demo mode returns one source per account in the synthetic org, which is
+    what lets the graph engine find chains that cross an account boundary.
+    Real mode returns a single source: scanning a whole AWS Organization needs
+    a management-account role and an sts:AssumeRole fan-out, which this
+    deliberately doesn't attempt with a single submitted key pair.
+    """
+    if mode == "demo":
+        from app.demo import mock_aws
+
+        return [DemoAWSDataSource(account_id=a["id"]) for a in mock_aws.ACCOUNTS]
+
+    return [
+        get_data_source(
+            mode,
+            region=region,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            session_token=session_token,
+        )
+    ]

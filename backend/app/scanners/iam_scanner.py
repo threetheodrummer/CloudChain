@@ -27,6 +27,30 @@ COMPUTE_CREATE_ACTIONS = {
 }
 
 
+def _account_from_arn(arn: str) -> str:
+    """'arn:aws:iam::111111111111:user/bob' -> '111111111111'.
+
+    Returns "" for wildcards and anything unparseable, so a malformed trust
+    policy can never be mistaken for a same-account principal.
+    """
+    parts = arn.split(":")
+    if len(parts) < 5 or not parts[4].isdigit():
+        return ""
+    return parts[4]
+
+
+def _principal_name_from_arn(arn: str) -> Tuple[str, str]:
+    """'arn:aws:iam::111:user/bob' -> ('iam_user', 'bob'). ('', '') if not an
+    IAM user/role ARN -- ':root' means the whole account, not one identity."""
+    tail = arn.rsplit(":", 1)[-1]
+    kind, _, name = tail.partition("/")
+    if kind == "user" and name:
+        return "iam_user", name
+    if kind == "role" and name:
+        return "iam_role", name
+    return "", ""
+
+
 def _extract_role_name(resource: str) -> str:
     if resource == "*":
         return "*"
@@ -166,7 +190,72 @@ class IAMScanner:
                         evidence={"policies": policy_names},
                     )
                 )
+
+            findings.extend(self._scan_role_trust(role, policy_names, statements))
         return findings
+
+    def _scan_role_trust(
+        self, role: str, policy_names: List[str], statements: List[Tuple[str, str]]
+    ) -> List[Finding]:
+        """Roles whose trust policy lets a principal in another account in.
+
+        This is where organisation-level risk actually lives. A role can be
+        perfectly scoped inside its own account and still be the reason the
+        whole org falls over, because its trust policy names a principal in a
+        less-protected account. Single-account scanners cannot see this at all:
+        the role looks fine locally, and the trusting relationship is only
+        dangerous in combination with what's wrong somewhere else.
+        """
+        principals = self.source.list_role_trust_principals(role)
+        if not principals:
+            return []
+
+        this_account = getattr(self.source, "account_id", "") or ""
+        external = sorted(
+            {
+                acct
+                for acct in (_account_from_arn(p) for p in principals)
+                if acct and acct != this_account
+            }
+        )
+        if not external:
+            return []
+
+        is_admin = ("*", "*") in statements
+        return [
+            Finding(
+                resource_id=role,
+                resource_type="iam_role",
+                issue_code="IAM_CROSS_ACCOUNT_TRUST",
+                title=(
+                    f"IAM role '{role}' can be assumed from outside this account"
+                    + (" and grants administrator access" if is_admin else "")
+                ),
+                description=(
+                    f"The trust policy on '{role}' allows sts:AssumeRole from "
+                    f"{', '.join(principals)}. "
+                    + (
+                        "The role carries unrestricted (*:*) permissions, so compromising any "
+                        "of those external principals yields administrator access in this account."
+                        if is_admin
+                        else "Compromising any of those external principals grants this role's "
+                        "permissions in this account."
+                    )
+                ),
+                base_severity=Severity.CRITICAL if is_admin else Severity.MEDIUM,
+                sensitive=is_admin,
+                remediation=(
+                    "Scope the trust policy to the specific role that needs it, add an "
+                    "sts:ExternalId condition, and reduce the role's permissions to least privilege."
+                ),
+                evidence={
+                    "trusted_principals": principals,
+                    "external_accounts": external,
+                    "grants_admin": is_admin,
+                    "policies": policy_names,
+                },
+            )
+        ]
 
     def _scan_password_policy(self) -> List[Finding]:
         policy = self.source.get_account_password_policy()

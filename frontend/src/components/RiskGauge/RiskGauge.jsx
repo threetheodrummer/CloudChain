@@ -42,7 +42,7 @@ const Dimension = ({ component, open, onToggle }) => {
           <span className="dim__fill" style={{ width: `${pct}%`, background: tone }} />
         </span>
         <span className="dim__points" style={{ color: tone }}>
-          &minus;{lost.toFixed(1)}<em> / {weight}</em>
+          {lost.toFixed(1)}<em> / {weight}</em>
         </span>
       </button>
 
@@ -53,7 +53,7 @@ const Dimension = ({ component, open, onToggle }) => {
           <span className="dim__tag">How this was calculated</span>
           <p className="dim__method">{method}</p>
           <p className="dim__math">
-            raw {raw.toFixed(2)} &times; weight {weight} = <strong>&minus;{lost.toFixed(2)} points</strong>
+            raw {raw.toFixed(2)} &times; weight {weight} = <strong>{lost.toFixed(2)} points deducted</strong>
           </p>
 
           {factors.length > 0 ? (
@@ -131,7 +131,7 @@ const RiskGauge = ({ posture }) => {
             <span className="gauge__grade" style={{ color: tone, borderColor: tone }}>{grade}</span>
           </div>
         </div>
-        <p className="gauge__deducted">&minus;{totalDeducted} points from 100</p>
+        <p className="gauge__deducted">{totalDeducted} points deducted from 100</p>
       </div>
 
       <div className="gauge__detail">
