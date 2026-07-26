@@ -60,6 +60,21 @@ export async function getLatestReport(mode = 'demo') {
   return handle(res);
 }
 
+/**
+ * Re-check every attack path in a stored scan against the account.
+ * Read-only: the backend verifies each hop's preconditions and never performs
+ * the escalation. Real-mode scans need credentials again, since scan-time
+ * credentials are deliberately never persisted.
+ */
+export async function validateScanPaths(scanId, credentials) {
+  const res = await fetch(`${BASE}/scans/${scanId}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials ?? null)
+  });
+  return handle(res);
+}
+
 export async function getHealth() {
   const res = await fetch(`${BASE}/health`);
   return handle(res);

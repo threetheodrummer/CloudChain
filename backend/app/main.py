@@ -19,8 +19,9 @@ from app.config import settings
 from app.jobs import get_job, start_scan
 from app.pipeline import run_scan
 from app.report.generator import build_report
-from app.sources import validate_credentials
+from app.sources import get_data_source, validate_credentials
 from app.storage import get_scan, list_scans
+from app.validation import validate_paths
 
 app = FastAPI(title="CloudChain", version="0.2.0", description="Attack-path-aware CSPM")
 
@@ -145,6 +146,58 @@ def scan_report(scan_id: str):
     if result is None:
         raise HTTPException(404, detail="scan not found")
     return build_report(result)
+
+
+@app.post("/api/scans/{scan_id}/validate")
+def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
+    """Re-check every attack path in a stored scan against the account.
+
+    Validation issues read-only calls only -- it verifies each hop's
+    preconditions and never performs the escalation. See
+    app/validation/path_validator.py for what that guarantee rests on.
+
+    Demo scans validate with no input. Real scans need credentials again,
+    because scan-time credentials are deliberately never persisted.
+    """
+    result = get_scan(scan_id)
+    if result is None:
+        raise HTTPException(404, detail="scan not found")
+
+    if not result.attack_paths:
+        return {"scan_id": scan_id, "mode": result.mode, "validations": []}
+
+    if result.mode == "real":
+        if not creds or not creds.access_key_id or not creds.secret_access_key:
+            raise HTTPException(
+                400,
+                detail=(
+                    "Validating a real-account scan requires credentials again -- "
+                    "scan-time credentials are never stored."
+                ),
+            )
+        check = validate_credentials(
+            region=creds.region,
+            access_key_id=creds.access_key_id,
+            secret_access_key=creds.secret_access_key,
+            session_token=creds.session_token or None,
+        )
+        if not check["valid"]:
+            raise HTTPException(401, detail=check["error"] or "Invalid AWS credentials")
+
+    source = get_data_source(
+        result.mode,
+        region=creds.region if creds else settings.aws_region,
+        access_key_id=creds.access_key_id if creds else None,
+        secret_access_key=creds.secret_access_key if creds else None,
+        session_token=(creds.session_token or None) if creds else None,
+    )
+
+    validations = validate_paths(result.attack_paths, source, result.graph)
+    return {
+        "scan_id": scan_id,
+        "mode": result.mode,
+        "validations": [v.model_dump(mode="json") for v in validations],
+    }
 
 
 @app.get("/api/report/latest")

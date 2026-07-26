@@ -3,6 +3,8 @@ import Wordmark from '../Wordmark/Wordmark';
 import GlowPanel from '../GlowPanel/GlowPanel';
 import RiskGauge from '../RiskGauge/RiskGauge';
 import AttackGraph from '../AttackGraph/AttackGraph';
+import PathValidation from '../PathValidation/PathValidation';
+import { validateScanPaths } from '../../api/client';
 import { downloadHtml, downloadJson } from '../../lib/downloadReport';
 import './Dashboard.css';
 
@@ -102,6 +104,28 @@ const Dashboard = ({ report, onNewScan }) => {
   const { summary, attack_paths: attackPaths, top_findings: topFindings, drift, posture, graph } = report;
   const [openFinding, setOpenFinding] = useState(null);
 
+  // Validation is on demand rather than part of the scan: it costs a second
+  // round of API calls, and the interesting question ("is this still true?")
+  // is usually asked about one path, not all of them.
+  const [validations, setValidations] = useState({});
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState('');
+
+  const runValidation = async () => {
+    setValidating(true);
+    setValidationError('');
+    try {
+      const res = await validateScanPaths(report.scan_id);
+      const byPath = {};
+      for (const v of res.validations) byPath[v.path_id] = v;
+      setValidations(byPath);
+    } catch (err) {
+      setValidationError(err.message || 'Validation failed');
+    } finally {
+      setValidating(false);
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="app-shell__header">
@@ -184,6 +208,13 @@ const Dashboard = ({ report, onNewScan }) => {
                 ))}
               </ol>
               <p className="path-card__outcome">Result: full account takeover.</p>
+
+              <PathValidation
+                validation={validations[p.path_id]}
+                onValidate={runValidation}
+                loading={validating}
+                error={validationError}
+              />
             </div>
             </GlowPanel>
           ))}

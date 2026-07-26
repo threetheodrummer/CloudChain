@@ -98,6 +98,52 @@ class ScanGraph(BaseModel):
     edges: List[GraphEdge] = Field(default_factory=list)
 
 
+class VerdictStatus(str, Enum):
+    """Outcome of re-checking one claim against the live account.
+
+    There is deliberately no "EXPLOITED" state. CloudChain verifies the
+    preconditions of each hop with read-only calls; it never performs the
+    escalation itself. See app/validation/path_validator.py.
+    """
+
+    CONFIRMED = "CONFIRMED"  # a read-only API response proves the precondition
+    REFUTED = "REFUTED"  # a read-only API response contradicts it
+    UNVERIFIABLE = "UNVERIFIABLE"  # the API did not return enough to decide
+
+
+class EvidenceCall(BaseModel):
+    """One read-only API call made while verifying a hop, and what came back.
+
+    `cli` is the equivalent aws-cli invocation so a reviewer can reproduce the
+    check by hand rather than taking CloudChain's word for it.
+    """
+
+    api: str
+    request: str
+    observed: str
+    cli: str = ""
+
+
+class HopVerification(BaseModel):
+    index: int
+    source: str
+    target: str
+    relation: str
+    claim: str  # what this hop asserts, in plain English
+    status: VerdictStatus
+    reason: str
+    calls: List[EvidenceCall] = Field(default_factory=list)
+
+
+class PathValidation(BaseModel):
+    path_id: str
+    status: VerdictStatus
+    summary: str
+    validated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    read_only: bool = True
+    hops: List[HopVerification] = Field(default_factory=list)
+
+
 class ScanResult(BaseModel):
     scan_id: str
     mode: str  # demo | real
