@@ -1,0 +1,62 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.5",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_s3_bucket.artifacts",
+          "type": "aws_s3_bucket",
+          "name": "artifacts",
+          "values": { "bucket": "ci-artifacts-bucket" }
+        },
+        {
+          "address": "aws_s3_bucket_acl.artifacts",
+          "type": "aws_s3_bucket_acl",
+          "name": "artifacts",
+          "values": { "bucket": "ci-artifacts-bucket", "acl": "public-read" }
+        },
+        {
+          "address": "aws_s3_object.deploy_credentials",
+          "type": "aws_s3_object",
+          "name": "deploy_credentials",
+          "values": { "bucket": "ci-artifacts-bucket", "key": "ci/credentials.csv" }
+        },
+        {
+          "address": "aws_iam_user.ci_deployer",
+          "type": "aws_iam_user",
+          "name": "ci_deployer",
+          "values": { "name": "ci-deployer" }
+        },
+        {
+          "address": "aws_iam_policy.ci_deploy",
+          "type": "aws_iam_policy",
+          "name": "ci_deploy",
+          "values": {
+            "name": "CiDeployPolicy",
+            "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"iam:PassRole\"],\"Resource\":\"arn:aws:iam::111111111111:role/CiExecutionRole\"},{\"Effect\":\"Allow\",\"Action\":[\"lambda:CreateFunction\",\"lambda:InvokeFunction\"],\"Resource\":\"*\"}]}"
+          }
+        },
+        {
+          "address": "aws_iam_user_policy_attachment.ci_deploy",
+          "type": "aws_iam_user_policy_attachment",
+          "name": "ci_deploy",
+          "values": {
+            "user": "ci-deployer",
+            "policy_arn": "arn:aws:iam::111111111111:policy/CiDeployPolicy"
+          }
+        },
+        {
+          "address": "aws_iam_role.ci_execution",
+          "type": "aws_iam_role",
+          "name": "ci_execution",
+          "values": {
+            "name": "CiExecutionRole",
+            "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}",
+            "managed_policy_arns": ["arn:aws:iam::aws:policy/AdministratorAccess"]
+          }
+        }
+      ]
+    }
+  }
+}

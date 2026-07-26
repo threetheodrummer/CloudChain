@@ -271,38 +271,87 @@ def find_attack_paths(g: nx.DiGraph, findings_by_resource: Dict[str, List[Findin
                 continue
 
             for raw in raw_paths:
-                steps = []
-                for i in range(len(raw) - 1):
-                    src, tgt = raw[i], raw[i + 1]
-                    relation = g.edges[src, tgt]["relation"]
-                    template = _RELATION_TEMPLATES.get(relation, "{src} -> {tgt} ({relation})")
-                    steps.append(
-                        template.format(src=_describe(g, src), tgt=_describe(g, tgt), relation=relation)
-                    )
+                paths.append(_build_path(g, raw, entry_kind="internet"))
 
-                accounts = [g.nodes[n].get("account_id", "") for n in raw]
-                involved = sorted({a for a in accounts if a})
-                crosses = len(involved) > 1
+    return paths
 
-                narrative = ". Then, ".join(steps) + ", resulting in full account takeover."
-                if crosses:
-                    narrative += (
-                        " This chain crosses an account boundary, so no single account's "
-                        "configuration reveals it."
-                    )
 
-                path_id = hashlib.sha256("->".join(raw).encode()).hexdigest()[:12]
-                paths.append(
-                    AttackPath(
-                        path_id=path_id,
-                        node_ids=raw,
-                        steps=steps,
-                        severity=Severity.CRITICAL,
-                        narrative=narrative,
-                        crosses_accounts=crosses,
-                        accounts=involved,
-                    )
-                )
+def _build_path(g: nx.DiGraph, raw: List[str], entry_kind: str) -> AttackPath:
+    steps = []
+    for i in range(len(raw) - 1):
+        src, tgt = raw[i], raw[i + 1]
+        relation = g.edges[src, tgt]["relation"]
+        template = _RELATION_TEMPLATES.get(relation, "{src} -> {tgt} ({relation})")
+        steps.append(template.format(src=_describe(g, src), tgt=_describe(g, tgt), relation=relation))
+
+    accounts = [g.nodes[n].get("account_id", "") for n in raw]
+    involved = sorted({a for a in accounts if a})
+    crosses = len(involved) > 1
+
+    if entry_kind == "identity":
+        narrative = (
+            "Starting from a compromised " + _describe(g, raw[0]) + ": "
+            + ". Then, ".join(steps)
+            + ", resulting in administrator access."
+        )
+    else:
+        narrative = ". Then, ".join(steps) + ", resulting in full account takeover."
+    if crosses:
+        narrative += (
+            " This chain crosses an account boundary, so no single account's "
+            "configuration reveals it."
+        )
+
+    return AttackPath(
+        path_id=hashlib.sha256("->".join(raw).encode()).hexdigest()[:12],
+        node_ids=raw,
+        steps=steps,
+        severity=Severity.CRITICAL,
+        narrative=narrative,
+        crosses_accounts=crosses,
+        accounts=involved,
+        entry_kind=entry_kind,
+    )
+
+
+def find_escalation_paths(
+    g: nx.DiGraph, findings_by_resource: Dict[str, List[Finding]]
+) -> List[AttackPath]:
+    """Routes to admin that start from an ordinary IAM identity.
+
+    find_attack_paths answers "can an unauthenticated attacker reach admin".
+    This answers the weaker but still important question: "if any one identity
+    were compromised, could it become an administrator?"
+
+    They are kept separate because conflating them overstates risk -- an
+    escalation primitive is not a live breach. But for pre-deploy checking the
+    escalation question is the one that matters: a plan cannot prove that a
+    bucket leaks a specific identity's credentials, so it can rarely establish
+    an internet entry point, while it can prove perfectly well that a pull
+    request creates a user who can make itself an administrator.
+
+    Direct identity -> admin edges are excluded: an identity that already holds
+    a wildcard policy hasn't escalated, it's simply an admin already.
+    """
+    sinks = [n for n in g.nodes if is_admin_sink(n)]
+    if not sinks:
+        return []
+
+    identities = sorted(n for n in g.nodes if parse_node(n)[1] in ("iam_user", "iam_role"))
+    paths: List[AttackPath] = []
+
+    for start in identities:
+        for sink in sorted(sinks):
+            if start == sink:
+                continue
+            try:
+                raw_paths = list(nx.all_simple_paths(g, start, sink))
+            except nx.NodeNotFound:
+                continue
+            for raw in raw_paths:
+                if len(raw) < 3:
+                    continue  # already an administrator, not an escalation
+                paths.append(_build_path(g, raw, entry_kind="identity"))
 
     return paths
 

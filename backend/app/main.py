@@ -9,7 +9,7 @@ Run locally:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +17,12 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.jobs import get_job, start_scan
+from app.models import ScanResult
 from app.pipeline import run_scan
 from app.report.generator import build_report
 from app.sources import get_data_sources, validate_credentials
 from app.storage import get_scan, list_scans
+from app.terraform import analyse_plan
 from app.validation import validate_paths
 
 app = FastAPI(title="CloudChain", version="0.2.0", description="Attack-path-aware CSPM")
@@ -200,6 +202,44 @@ def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
         "mode": result.mode,
         "validations": [v.model_dump(mode="json") for v in validations],
     }
+
+
+class PlanRequest(BaseModel):
+    """A `terraform show -json` document, plus where it will be applied."""
+
+    plan: Dict[str, Any] = Field(description="Parsed output of `terraform show -json tfplan`")
+    account_id: str = Field(default="", description="Account the plan targets")
+    account_name: str = Field(default="")
+    baseline_scan_id: str = Field(
+        default="", description="Scan to diff against; defaults to the latest demo scan"
+    )
+
+
+@app.post("/api/plan/analyze")
+def analyze_plan(req: PlanRequest):
+    """Scan a Terraform plan and report what it changes about the attack surface.
+
+    Runs the identical scanners, graph engine and posture model used for a live
+    account, so the verdict here is the verdict you'd get after apply.
+    """
+    baseline: Optional[ScanResult] = None
+    if req.baseline_scan_id:
+        baseline = get_scan(req.baseline_scan_id)
+        if baseline is None:
+            raise HTTPException(404, detail="baseline scan not found")
+    else:
+        recent = list_scans(limit=1)
+        baseline = recent[0] if recent else None
+
+    try:
+        return analyse_plan(
+            req.plan,
+            baseline=baseline,
+            account_id=req.account_id,
+            account_name=req.account_name,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, detail=f"could not parse the Terraform plan: {exc}") from exc
 
 
 @app.get("/api/report/latest")

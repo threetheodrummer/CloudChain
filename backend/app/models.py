@@ -111,6 +111,12 @@ class AttackPath(BaseModel):
     # account's configuration reveals it, so per-account tooling cannot see it.
     crosses_accounts: bool = False
     accounts: List[str] = Field(default_factory=list)
+    # Where the chain starts. "internet" means an unauthenticated attacker can
+    # reach the first hop; "identity" means it starts from an ordinary IAM
+    # principal that is not already an administrator. The distinction matters:
+    # the first is a live breach route, the second is a latent escalation
+    # primitive that only pays off once an identity is compromised.
+    entry_kind: str = "internet"
 
 
 class ScanGraph(BaseModel):

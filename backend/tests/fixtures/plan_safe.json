@@ -1,0 +1,90 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.5",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_s3_bucket.artifacts",
+          "type": "aws_s3_bucket",
+          "name": "artifacts",
+          "values": { "bucket": "ci-artifacts-bucket" }
+        },
+        {
+          "address": "aws_s3_bucket_public_access_block.artifacts",
+          "type": "aws_s3_bucket_public_access_block",
+          "name": "artifacts",
+          "values": {
+            "bucket": "ci-artifacts-bucket",
+            "block_public_acls": true,
+            "block_public_policy": true,
+            "ignore_public_acls": true,
+            "restrict_public_buckets": true
+          }
+        },
+        {
+          "address": "aws_s3_bucket_server_side_encryption_configuration.artifacts",
+          "type": "aws_s3_bucket_server_side_encryption_configuration",
+          "name": "artifacts",
+          "values": { "bucket": "ci-artifacts-bucket" }
+        },
+        {
+          "address": "aws_s3_bucket_versioning.artifacts",
+          "type": "aws_s3_bucket_versioning",
+          "name": "artifacts",
+          "values": {
+            "bucket": "ci-artifacts-bucket",
+            "versioning_configuration": [{ "status": "Enabled" }]
+          }
+        },
+        {
+          "address": "aws_s3_object.deploy_credentials",
+          "type": "aws_s3_object",
+          "name": "deploy_credentials",
+          "values": { "bucket": "ci-artifacts-bucket", "key": "ci/credentials.csv" }
+        },
+        {
+          "address": "aws_iam_user.ci_deployer",
+          "type": "aws_iam_user",
+          "name": "ci_deployer",
+          "values": { "name": "ci-deployer" }
+        },
+        {
+          "address": "aws_iam_policy.ci_deploy",
+          "type": "aws_iam_policy",
+          "name": "ci_deploy",
+          "values": {
+            "name": "CiDeployPolicy",
+            "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"],\"Resource\":\"arn:aws:s3:::ci-artifacts-bucket/*\"}]}"
+          }
+        },
+        {
+          "address": "aws_iam_user_policy_attachment.ci_deploy",
+          "type": "aws_iam_user_policy_attachment",
+          "name": "ci_deploy",
+          "values": {
+            "user": "ci-deployer",
+            "policy_arn": "arn:aws:iam::111111111111:policy/CiDeployPolicy"
+          }
+        },
+        {
+          "address": "aws_security_group.internal",
+          "type": "aws_security_group",
+          "name": "internal",
+          "values": {
+            "id": "sg-internal01",
+            "name": "internal-sg",
+            "ingress": [
+              {
+                "cidr_blocks": ["10.0.0.0/16"],
+                "from_port": 443,
+                "to_port": 443,
+                "protocol": "tcp"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
