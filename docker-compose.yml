@@ -1,0 +1,41 @@
+# One-command local stack:
+#
+#   docker compose up --build
+#
+# then open http://localhost:8080. Demo mode needs no AWS credentials at all.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      CLOUDCHAIN_MODE: demo
+      CLOUDCHAIN_DB_PATH: /data/cloudchain.db
+      # Uncomment to scan a real account. Prefer a dedicated read-only IAM user
+      # with the AWS-managed SecurityAudit policy; never console credentials.
+      # AWS_REGION: us-east-1
+      # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    volumes:
+      # Scan snapshots must outlive the container or drift detection resets on
+      # every restart and silently stops being able to report anything.
+      - cloudchain-data:/data
+    expose:
+      - "8000"
+    # Not published to the host by default: the frontend proxies /api, so the
+    # backend has no reason to be directly reachable. Add a ports mapping if
+    # you want to hit the API with curl.
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  cloudchain-data:

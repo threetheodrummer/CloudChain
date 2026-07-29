@@ -1,5 +1,7 @@
 # CloudChain
 
+[![CI](https://github.com/threetheodrummer/CloudChain/actions/workflows/ci.yml/badge.svg)](https://github.com/threetheodrummer/CloudChain/actions/workflows/ci.yml)
+
 An attack-path-aware Cloud Security Posture Management (CSPM) tool for AWS.
 
 Most free CSPM tools (Prowler, ScoutSuite) report misconfigurations as a flat
@@ -93,19 +95,38 @@ python -m app.cli plan --file plan.json --account 111111111111
 Exits `1` when the change introduces a new route to `AdministratorAccess`, `0`
 otherwise. `--format markdown` emits a ready-to-post PR comment.
 
-**6. Contextual risk scoring, not static severity labels.** Every CSPM assigns
+**6. Attribution — who changed this, and when.** Drift tells you a finding is
+new. The question everyone asks next, and that no CSPM answers, is *who did
+it*. CloudChain maps each issue code to the CloudTrail management events that
+could have caused it and reports the actor, timestamp, source IP and user
+agent:
+
+> `PutBucketAcl` on `public-uploads-bucket` by `legacy-ci-user` from
+> `203.0.113.47` on 24 Jul 2026 at 06:11 UTC.
+
+This is inference, and it's labelled as such. CloudTrail records that a change
+happened, not that it produced this exact finding state, so every result
+carries a confidence: `EXACT` (one candidate event), `LIKELY` (several — the
+most recent is shown and the rest returned alongside it), or `UNATTRIBUTED`.
+
+`UNATTRIBUTED` is common and is not a failure. `LookupEvents` reads the 90-day
+event history, not a trail's S3 archive, so older changes are genuinely
+unanswerable this way. Saying "no event found" is correct; naming a plausible
+culprit would not be.
+
+**7. Contextual risk scoring, not static severity labels.** Every CSPM assigns
 a fixed severity per check. CloudChain scores each finding by
 `base_severity × internet_facing × sensitive × on_attack_path`, and every
 finding row in the UI expands to show that multiplier chain — replacing a
 severity label with a computed number is only an improvement if the number can
 be questioned.
 
-**7. Drift detection across scans.** Every scan is persisted to SQLite, so
+**8. Drift detection across scans.** Every scan is persisted to SQLite, so
 re-running shows "3 new, 1 resolved" rather than only ever a point-in-time
 snapshot. Fingerprints include the account id, because resource names are only
 unique within an account.
 
-**8. Content-aware S3 scanning.** Beyond bucket-level ACL/policy checks,
+**9. Content-aware S3 scanning.** Beyond bucket-level ACL/policy checks,
 CloudChain inspects object *keys* — never contents, it does not call
 `GetObject` — inside public buckets for credential-like naming patterns
 (`credentials.csv`, `.pem`, `.env`, `id_rsa`, …), which is what feeds the graph
@@ -129,10 +150,12 @@ CloudChain/
       risk/scoring.py     # per-finding contextual score + its derivation
       risk/posture.py     # 0-100 account posture, decomposed into four dimensions
       validation/         # re-check a reported path against the account, read-only
+      attribution/        # CloudTrail: who made the change, and when
       terraform/          # plan parsing, plan-as-data-source, pre-deploy diff
       storage/            # SQLite snapshot persistence + drift diffing
       report/             # assembles the final JSON report
-    tests/                # 99 tests; fixtures/ holds sample Terraform plans
+    Dockerfile
+    tests/                # 113 tests; fixtures/ holds sample Terraform plans
   frontend/
     src/
       components/
@@ -143,6 +166,7 @@ CloudChain/
         Dashboard/         # results: posture, paths, findings, drift
         RiskGauge/         # posture gauge + expandable dimension breakdown
         PathValidation/    # per-hop evidence trail with the API calls behind it
+        Attribution/       # who changed what, with the CloudTrail record
         AttackGraph/       # SVG chain view, with account-boundary markers
         ScanHistory/       # past scans, backed by /api/scans
         About/             # how it works / risk scoring / attack paths
@@ -184,7 +208,20 @@ over-permissioned service account inside prod. The pair is wide open.
 The demo account scores **24/100, grade F**, with reachability the largest
 single contributor. Both chains validate as `CONFIRMED` end to end.
 
-## Setup
+## Quick start with Docker
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:8080. Demo mode needs no AWS credentials.
+
+nginx serves the built frontend and proxies `/api` to the backend, so the
+browser sees a single origin and CORS isn't involved. Scan snapshots live on a
+named volume — without one, drift detection resets on every restart and quietly
+stops being able to report anything.
+
+## Setup (without Docker)
 
 Open the `CloudChain` folder (this one, not `backend/`) as your project root in
 VS Code, then run the backend and frontend in two separate terminals.
@@ -276,14 +313,45 @@ instead of crashing the scan.
 | GET | `/api/scans/{scan_id}` | Full raw scan result (incl. graph) |
 | GET | `/api/scans/{scan_id}/report` | Report view of a specific past scan |
 | POST | `/api/scans/{scan_id}/validate` | Re-check every attack path, read-only |
+| POST | `/api/scans/{scan_id}/attribute` | Name the actor and API call behind each finding |
 | POST | `/api/plan/analyze` | Analyse a Terraform plan and diff it against a scan |
 | GET | `/api/report/latest?mode=demo` | Report for the most recent scan |
 
 `GET /api/scans/{scan_id}` includes the full `graph` object (`nodes`/`edges`) for
 rendering the attack-path graph in the frontend.
 
-Validating a **real**-mode scan requires supplying credentials again in the
-request body, because scan-time credentials are deliberately never persisted.
+Validating or attributing a **real**-mode scan requires supplying credentials
+again in the request body, because scan-time credentials are deliberately never
+persisted.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+- **Backend tests** on Python 3.10 and 3.13 — the supported floor, and a
+  version new enough to surface deprecations early.
+- **Frontend build** with `npm ci` against the lockfile.
+- **Self-check** — a real demo scan on a clean runner, plus both Terraform
+  fixtures through the gate. The dangerous plan *must* exit non-zero; if that
+  step ever goes green, the shift-left check has silently stopped working,
+  which is worse than not having one.
+
+`.github/workflows/terraform-plan-check.yml` is a reusable workflow, so an
+infrastructure repo can gate its pull requests without vendoring anything:
+
+```yaml
+jobs:
+  cloudchain:
+    uses: threetheodrummer/CloudChain/.github/workflows/terraform-plan-check.yml@main
+    with:
+      plan-file: plan.json
+      account-id: "111111111111"
+```
+
+It posts the verdict as a PR comment and updates that comment in place on each
+push rather than adding a new one, so a long-running pull request stays
+readable. `fail-on-new-path: false` reports without blocking, which is a
+sensible way to introduce the gate to a team already mid-flight.
 
 ## Safety guarantees
 
@@ -362,10 +430,10 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-99 tests covering scanner logic, attack-path graph construction, cross-account
+113 tests covering scanner logic, attack-path graph construction, cross-account
 correlation, risk scoring, the posture engine's explainability contract,
-path validation and its safety guarantees, Terraform plan parity, drift
-detection, and the background job runner.
+path validation and its safety guarantees, CloudTrail attribution, Terraform
+plan parity, drift detection, and the background job runner.
 
 A few are worth reading as documentation of intent:
 
@@ -376,6 +444,8 @@ A few are worth reading as documentation of intent:
 | `test_unresolvable_policies_are_unverifiable_not_confirmed` | Missing data never reads as a pass |
 | `test_cross_account_hop_uses_assume_role_not_passrole` | No reported chain is unwalkable in real AWS |
 | `test_a_partial_plan_does_not_claim_to_have_removed_the_rest` | A small PR can't claim credit for the whole account |
+| `test_no_matching_event_is_unattributed_not_guessed` | Attribution never invents a culprit |
+| `test_events_do_not_leak_between_accounts` | A resource name in one account can't match another's trail |
 | `test_public_state_never_leaks_credentials` | Submitted keys never reach the browser |
 
 ## Known limitations
@@ -406,11 +476,19 @@ Worth being able to state plainly — most of these are deliberate.
   for plan checking, where the question "could this identity make itself an
   admin?" is the useful gate. Surfacing them alongside internet-entry paths in
   the UI would need care not to conflate a latent primitive with a live breach.
+- **Attribution reaches back 90 days.** `LookupEvents` reads CloudTrail's event
+  history, not a trail's S3 archive. Going further would mean querying the
+  archive with Athena, which is a different (and much slower) shape of
+  integration.
+- **Attribution matches on resource name, not ARN.** CloudTrail's
+  `ResourceName` lookup is name-based, so a resource renamed after the change
+  won't match its own history.
 
 ## Roadmap
 
-- CloudTrail attribution — join drift with CloudTrail so each new finding names
-  the actor, the API call and the timestamp that caused it.
-- GitHub Actions workflow shipping the `plan` check as a reusable job, plus CI
-  running the test suite on every push.
-- Docker Compose for one-command local startup, and a deployed demo instance.
+- A deployed demo instance so the tool can be tried without cloning it.
+- Timeline view — reconstruct account posture at any past point, using the
+  stored snapshots plus attribution.
+- Broader coverage: RDS, Lambda, KMS, and multi-region scanning.
+- Scanning a real AWS Organization via a management-account role and
+  `sts:AssumeRole` fan-out, so real mode matches the org-wide graph model.

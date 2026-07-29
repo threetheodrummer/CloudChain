@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger("cloudchain.sources")
 
@@ -101,6 +101,21 @@ class AWSDataSource(ABC):
     @abstractmethod
     def list_security_groups(self) -> List[Dict[str, Any]]: ...
 
+    # --- CloudTrail ---
+    def lookup_events(
+        self,
+        resource_name: str,
+        event_names: Sequence[str],
+        lookback_days: int = 90,
+    ) -> List[Dict[str, Any]]:
+        """Management events touching a resource, most recent first.
+
+        Concrete default returning nothing, so a data source that has no trail
+        (or no permission to read one) degrades to "cannot attribute" rather
+        than breaking a scan.
+        """
+        return []
+
 
 class DemoAWSDataSource(AWSDataSource):
     """Reads one account of the seeded synthetic org in app/demo/mock_aws.py.
@@ -179,6 +194,30 @@ class DemoAWSDataSource(AWSDataSource):
     def list_security_groups(self) -> List[Dict[str, Any]]:
         return [dict(sg) for sg in self._account["security_groups"]]
 
+    def lookup_events(
+        self,
+        resource_name: str,
+        event_names: Sequence[str],
+        lookback_days: int = 90,
+    ) -> List[Dict[str, Any]]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        wanted = set(event_names)
+
+        matches = []
+        for event in self._m.CLOUDTRAIL_EVENTS:
+            if event["account_id"] != self.account_id:
+                continue
+            if resource_name not in event.get("resources", []):
+                continue
+            if wanted and event["event_name"] not in wanted:
+                continue
+            if datetime.fromisoformat(event["event_time"]) < cutoff:
+                continue
+            matches.append(dict(event))
+
+        matches.sort(key=lambda e: e["event_time"], reverse=True)
+        return matches
+
 
 class RealAWSDataSource(AWSDataSource):
     """Talks to a live AWS account via boto3.
@@ -218,6 +257,7 @@ class RealAWSDataSource(AWSDataSource):
         self._s3 = session.client("s3")
         self._iam = session.client("iam")
         self._ec2 = session.client("ec2")
+        self._cloudtrail = session.client("cloudtrail")
 
         # Resolve the account id once so findings can be attributed. A failure
         # here is non-fatal: the scan still runs, findings are just unattributed.
@@ -455,6 +495,78 @@ class RealAWSDataSource(AWSDataSource):
                 "require_lowercase": False,
             },
         )
+
+    # --- CloudTrail ---
+    def lookup_events(
+        self,
+        resource_name: str,
+        event_names: Sequence[str],
+        lookback_days: int = 90,
+    ) -> List[Dict[str, Any]]:
+        """CloudTrail LookupEvents for one resource.
+
+        LookupEvents accepts only a single lookup attribute per call, so the
+        query is by ResourceName and the event-name filter is applied here.
+        Note the hard 90-day limit: LookupEvents reads CloudTrail's own event
+        history, not a trail's S3 bucket, so anything older is simply not
+        answerable this way.
+        """
+
+        def call():
+            start = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            wanted = set(event_names)
+            results: List[Dict[str, Any]] = []
+
+            paginator = self._cloudtrail.get_paginator("lookup_events")
+            pages = paginator.paginate(
+                LookupAttributes=[
+                    {"AttributeKey": "ResourceName", "AttributeValue": resource_name}
+                ],
+                StartTime=start,
+                PaginationConfig={"MaxItems": 200},
+            )
+            for page in pages:
+                for event in page.get("Events", []):
+                    name = event.get("EventName", "")
+                    if wanted and name not in wanted:
+                        continue
+                    results.append(self._normalise_event(event, resource_name))
+            return results
+
+        events = self._safe(call, [])
+        events.sort(key=lambda e: e["event_time"], reverse=True)
+        return events
+
+    @staticmethod
+    def _normalise_event(event: Dict[str, Any], resource_name: str) -> Dict[str, Any]:
+        """Flatten a LookupEvents record into the shape the attributor expects."""
+        import json as _json
+
+        detail: Dict[str, Any] = {}
+        raw = event.get("CloudTrailEvent")
+        if raw:
+            try:
+                detail = _json.loads(raw)
+            except (ValueError, TypeError):
+                detail = {}
+
+        identity = detail.get("userIdentity", {}) or {}
+        event_time = event.get("EventTime")
+
+        return {
+            "account_id": identity.get("accountId", ""),
+            "event_id": event.get("EventId", ""),
+            "event_name": event.get("EventName", ""),
+            "event_time": event_time.isoformat() if hasattr(event_time, "isoformat") else str(event_time),
+            "actor_arn": identity.get("arn") or event.get("Username", "") or "unknown",
+            "actor_type": identity.get("type", "Unknown"),
+            "source_ip": detail.get("sourceIPAddress", ""),
+            "user_agent": detail.get("userAgent", ""),
+            "resources": [
+                r.get("ResourceName", "") for r in event.get("Resources", [])
+            ] or [resource_name],
+            "request_parameters": detail.get("requestParameters") or {},
+        }
 
     # --- EC2 / Security Groups ---
     def list_security_groups(self) -> List[Dict[str, Any]]:

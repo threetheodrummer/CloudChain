@@ -186,6 +186,45 @@ class ScanResult(BaseModel):
         return counts
 
 
+class AttributionConfidence(str, Enum):
+    """How firmly a finding can be tied to the API call that caused it.
+
+    Attribution is inference, not proof: CloudTrail records that a change
+    happened, not that this particular change produced this particular finding
+    state. The confidence level is how CloudChain says which of those it has.
+    """
+
+    EXACT = "EXACT"  # exactly one candidate event names this resource
+    LIKELY = "LIKELY"  # several candidates; the most recent is reported
+    UNATTRIBUTED = "UNATTRIBUTED"  # nothing found in the retention window
+
+
+class TrailEvent(BaseModel):
+    event_id: str
+    event_name: str
+    event_time: datetime
+    actor_arn: str
+    actor_type: str  # IAMUser | AssumedRole | Root | AWSService
+    source_ip: str = ""
+    user_agent: str = ""
+    request_parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FindingAttribution(BaseModel):
+    finding_id: str
+    account_id: str = ""
+    resource_id: str
+    issue_code: str
+    confidence: AttributionConfidence
+    summary: str
+    lookback_days: int
+    event: Optional[TrailEvent] = None
+    # Other events that could also explain the finding. Shown rather than
+    # hidden, because picking the most recent one is a judgement call the
+    # reader is entitled to check.
+    other_candidates: List[TrailEvent] = Field(default_factory=list)
+
+
 class DriftStatus(str, Enum):
     NEW = "NEW"
     RESOLVED = "RESOLVED"

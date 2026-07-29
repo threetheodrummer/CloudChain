@@ -4,7 +4,8 @@ import GlowPanel from '../GlowPanel/GlowPanel';
 import RiskGauge from '../RiskGauge/RiskGauge';
 import AttackGraph from '../AttackGraph/AttackGraph';
 import PathValidation from '../PathValidation/PathValidation';
-import { validateScanPaths } from '../../api/client';
+import Attribution from '../Attribution/Attribution';
+import { attributeScanFindings, validateScanPaths } from '../../api/client';
 import { downloadHtml } from '../../lib/downloadReport';
 import './Dashboard.css';
 
@@ -115,6 +116,23 @@ const Dashboard = ({ report, onNewScan }) => {
   const [validations, setValidations] = useState({});
   const [validating, setValidating] = useState(false);
   const [validationError, setValidationError] = useState('');
+
+  // Attribution costs a round of CloudTrail lookups, so it's on demand too.
+  const [attribution, setAttribution] = useState(null);
+  const [attributing, setAttributing] = useState(false);
+  const [attributionError, setAttributionError] = useState('');
+
+  const runAttribution = async () => {
+    setAttributing(true);
+    setAttributionError('');
+    try {
+      setAttribution(await attributeScanFindings(report.scan_id, { limit: 25 }));
+    } catch (err) {
+      setAttributionError(err.message || 'Could not read CloudTrail');
+    } finally {
+      setAttributing(false);
+    }
+  };
 
   const runValidation = async () => {
     setValidating(true);
@@ -287,6 +305,21 @@ const Dashboard = ({ report, onNewScan }) => {
           </tbody>
         </table>
         </div>
+        </GlowPanel>
+      </section>
+
+      <section className="app-shell__attribution">
+        <h2>Who changed this</h2>
+        <GlowPanel radius={12}>
+          <div className="panel-body">
+            <Attribution
+              scanId={report.scan_id}
+              data={attribution}
+              loading={attributing}
+              error={attributionError}
+              onAttribute={runAttribution}
+            />
+          </div>
         </GlowPanel>
       </section>
 

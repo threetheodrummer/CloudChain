@@ -1,0 +1,236 @@
+/* Change attribution: who made the change, and when. */
+
+.attribution {
+  margin-top: 4px;
+}
+
+.attribution__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.attribution__head h3 {
+  margin: 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9fb0c3;
+}
+
+.attribution__meta {
+  font-size: 11.5px;
+  color: #5f7086;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.attribution__cta {
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.38);
+  border-radius: 8px;
+  color: #22d3ee;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 15px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.attribution__cta:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.2);
+}
+
+.attribution__cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.attribution__cta--small {
+  margin-top: 12px;
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+.attribution__note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #5f7086;
+  max-width: 78ch;
+}
+
+.attribution__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --- one row ----------------------------------------------------------- */
+
+.attr {
+  border-left: 2px solid rgba(255, 255, 255, 0.12);
+  padding: 2px 0 2px 14px;
+}
+
+.attr--exact { border-left-color: rgba(126, 224, 195, 0.55); }
+.attr--likely { border-left-color: rgba(255, 209, 102, 0.55); }
+.attr--unknown { border-left-color: rgba(255, 255, 255, 0.16); }
+
+.attr__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.attr__badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: help;
+}
+
+.attr__badge--exact {
+  color: #7ee0c3;
+  border-color: rgba(126, 224, 195, 0.5);
+  background: rgba(126, 224, 195, 0.08);
+}
+
+.attr__badge--likely {
+  color: #ffd166;
+  border-color: rgba(255, 209, 102, 0.5);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.attr__badge--unknown {
+  color: #7d8da3;
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.attr__issue {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11.5px;
+  color: #9aabc0;
+}
+
+.attr__resource {
+  font-size: 12.5px;
+  color: #e6edf3;
+}
+
+.attr__summary {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #b6c4d4;
+  max-width: 84ch;
+}
+
+.attr__toggle {
+  margin-top: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: #22d3ee;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.attr__detail {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(9, 14, 22, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.attr__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.attr__fields dt {
+  color: #5f7086;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  padding-top: 2px;
+}
+
+.attr__fields dd {
+  margin: 0;
+  color: #b6c4d4;
+  word-break: break-word;
+}
+
+.attr__fields code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11.5px;
+  color: #8ecae6;
+}
+
+.attr__fields em {
+  font-style: normal;
+  color: #5f7086;
+  font-size: 11px;
+}
+
+.attr__params {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #7ee0c3;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attr__others {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.09);
+}
+
+.attr__others-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #ffd166;
+  margin-bottom: 6px;
+}
+
+.attr__others ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #93a4b8;
+}
+
+.attr__others code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: #8ecae6;
+}

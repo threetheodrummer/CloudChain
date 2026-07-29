@@ -15,13 +15,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.attribution import LOOKBACK_DAYS, attribute_findings
 from app.config import settings
 from app.jobs import get_job, start_scan
 from app.models import ScanResult
 from app.pipeline import run_scan
 from app.report.generator import build_report
 from app.sources import get_data_sources, validate_credentials
-from app.storage import get_scan, list_scans
+from app.storage import compare_scans, get_previous_scan, get_scan, list_scans
 from app.terraform import analyse_plan
 from app.validation import validate_paths
 
@@ -201,6 +202,66 @@ def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
         "scan_id": scan_id,
         "mode": result.mode,
         "validations": [v.model_dump(mode="json") for v in validations],
+    }
+
+
+@app.post("/api/scans/{scan_id}/attribute")
+def attribute_scan_findings(
+    scan_id: str,
+    creds: Optional[AWSCredentials] = None,
+    limit: int = Query(default=25, ge=1, le=200),
+    only_new: bool = Query(
+        default=False, description="Attribute only findings that are new since the previous scan"
+    ),
+):
+    """Name the API call, actor and timestamp behind each finding.
+
+    Reads CloudTrail's 90-day event history. Findings older than that come back
+    UNATTRIBUTED, which is the honest answer rather than a guess.
+    """
+    result = get_scan(scan_id)
+    if result is None:
+        raise HTTPException(404, detail="scan not found")
+
+    if result.mode == "real":
+        if not creds or not creds.access_key_id or not creds.secret_access_key:
+            raise HTTPException(
+                400,
+                detail=(
+                    "Attributing a real-account scan requires credentials again -- "
+                    "scan-time credentials are never stored."
+                ),
+            )
+        check = validate_credentials(
+            region=creds.region,
+            access_key_id=creds.access_key_id,
+            secret_access_key=creds.secret_access_key,
+            session_token=creds.session_token or None,
+        )
+        if not check["valid"]:
+            raise HTTPException(401, detail=check["error"] or "Invalid AWS credentials")
+
+    findings = result.findings
+    if only_new:
+        previous = get_previous_scan(result.scan_id, result.mode)
+        drift = compare_scans(result, previous)
+        new_ids = {e.finding_id for e in drift.new_findings}
+        findings = [f for f in findings if f.id in new_ids]
+
+    sources = get_data_sources(
+        result.mode,
+        region=creds.region if creds else settings.aws_region,
+        access_key_id=creds.access_key_id if creds else None,
+        secret_access_key=creds.secret_access_key if creds else None,
+        session_token=(creds.session_token or None) if creds else None,
+    )
+
+    attributions = attribute_findings(findings[:limit], sources)
+    return {
+        "scan_id": scan_id,
+        "mode": result.mode,
+        "lookback_days": LOOKBACK_DAYS,
+        "attributions": [a.model_dump(mode="json") for a in attributions],
     }
 
 

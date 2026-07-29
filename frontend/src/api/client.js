@@ -75,6 +75,21 @@ export async function validateScanPaths(scanId, credentials) {
   return handle(res);
 }
 
+/**
+ * Name the API call, actor and timestamp behind each finding.
+ * Reads CloudTrail's 90-day event history, so older changes come back
+ * UNATTRIBUTED rather than guessed at.
+ */
+export async function attributeScanFindings(scanId, { limit = 25, onlyNew = false } = {}) {
+  const qs = new URLSearchParams({ limit: String(limit), only_new: String(onlyNew) });
+  const res = await fetch(`${BASE}/scans/${scanId}/attribute?${qs.toString()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(null)
+  });
+  return handle(res);
+}
+
 export async function getHealth() {
   const res = await fetch(`${BASE}/health`);
   return handle(res);

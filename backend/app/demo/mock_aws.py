@@ -339,6 +339,160 @@ ACCOUNTS: List[Dict[str, Any]] = [
 ]
 
 
+# --------------------------------------------------------------------------
+# Seeded CloudTrail management events.
+#
+# These give demo mode something to attribute its findings to: who made the
+# bucket public, who opened the cross-account trust, and when. Each event is
+# keyed to the resources it touched, mirroring the `resources` array CloudTrail
+# returns from LookupEvents.
+#
+# One deliberate gap: nothing here explains the stale access keys. They were
+# created well over the 90-day CloudTrail retention window, so attribution
+# correctly comes back UNATTRIBUTED rather than inventing a culprit -- which is
+# the honest behaviour on a real account too.
+# --------------------------------------------------------------------------
+
+CLOUDTRAIL_EVENTS: List[Dict[str, Any]] = [
+    {
+        "account_id": PROD,
+        "event_id": "9f1c0a3e-2b77-4c11-9f3a-1d2e3f4a5b6c",
+        "event_name": "PutBucketAcl",
+        "event_time": _days_ago(3),
+        "actor_arn": f"arn:aws:iam::{PROD}:user/legacy-ci-user",
+        "actor_type": "IAMUser",
+        "source_ip": "203.0.113.47",
+        "user_agent": "aws-cli/2.15.30 Python/3.11.8 Linux/6.5.0",
+        "resources": ["public-uploads-bucket"],
+        "request_parameters": {
+            "bucketName": "public-uploads-bucket",
+            "acl": "public-read",
+        },
+    },
+    {
+        "account_id": PROD,
+        "event_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+        "event_name": "DeleteBucketEncryption",
+        "event_time": _days_ago(3),
+        "actor_arn": f"arn:aws:iam::{PROD}:user/legacy-ci-user",
+        "actor_type": "IAMUser",
+        "source_ip": "203.0.113.47",
+        "user_agent": "aws-cli/2.15.30 Python/3.11.8 Linux/6.5.0",
+        "resources": ["public-uploads-bucket"],
+        "request_parameters": {"bucketName": "public-uploads-bucket"},
+    },
+    {
+        # An earlier, different actor also widened this bucket. Two candidate
+        # events means attribution reports LIKELY rather than EXACT and hands
+        # back both, instead of quietly picking one and sounding certain.
+        "account_id": PROD,
+        "event_id": "8b9c0d1e-2f3a-4b5c-6d7e-8f9012345678",
+        "event_name": "PutBucketPolicy",
+        "event_time": _days_ago(28),
+        "actor_arn": f"arn:aws:sts::{PROD}:assumed-role/TerraformDeployRole/ci-run-7104",
+        "actor_type": "AssumedRole",
+        "source_ip": "198.51.100.12",
+        "user_agent": "Terraform/1.9.5 (+https://www.terraform.io)",
+        "resources": ["public-uploads-bucket"],
+        "request_parameters": {
+            "bucketName": "public-uploads-bucket",
+            "policy": '{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject"}]}',
+        },
+    },
+    {
+        "account_id": PROD,
+        "event_id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+        "event_name": "AttachUserPolicy",
+        "event_time": _days_ago(41),
+        "actor_arn": f"arn:aws:sts::{PROD}:assumed-role/TerraformDeployRole/ci-run-8821",
+        "actor_type": "AssumedRole",
+        "source_ip": "198.51.100.12",
+        "user_agent": "Terraform/1.9.5 (+https://www.terraform.io)",
+        "resources": ["svc-deploy-bot"],
+        "request_parameters": {
+            "userName": "svc-deploy-bot",
+            "policyArn": f"arn:aws:iam::{PROD}:policy/DeployBotPolicy",
+        },
+    },
+    {
+        "account_id": PROD,
+        "event_id": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+        "event_name": "AuthorizeSecurityGroupIngress",
+        "event_time": _days_ago(9),
+        "actor_arn": f"arn:aws:iam::{PROD}:user/legacy-ci-user",
+        "actor_type": "IAMUser",
+        "source_ip": "203.0.113.47",
+        "user_agent": "console.amazonaws.com",
+        "resources": ["sg-0demo0webserver"],
+        "request_parameters": {
+            "groupId": "sg-0demo0webserver",
+            "ipPermissions": [{"fromPort": 22, "toPort": 22, "cidrIp": "0.0.0.0/0"}],
+        },
+    },
+    {
+        "account_id": PROD,
+        "event_id": "4d5e6f7a-8b9c-0d1e-2f3a-4b5c6d7e8f90",
+        "event_name": "AttachRolePolicy",
+        "event_time": _days_ago(41),
+        "actor_arn": f"arn:aws:sts::{PROD}:assumed-role/TerraformDeployRole/ci-run-8821",
+        "actor_type": "AssumedRole",
+        "source_ip": "198.51.100.12",
+        "user_agent": "Terraform/1.9.5 (+https://www.terraform.io)",
+        "resources": ["LambdaExecutionAdminRole"],
+        "request_parameters": {
+            "roleName": "LambdaExecutionAdminRole",
+            "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess",
+        },
+    },
+    {
+        "account_id": SHARED,
+        "event_id": "5e6f7a8b-9c0d-1e2f-3a4b-5c6d7e8f9012",
+        "event_name": "UpdateAssumeRolePolicy",
+        "event_time": _days_ago(12),
+        "actor_arn": f"arn:aws:iam::{SHARED}:user/platform-admin",
+        "actor_type": "IAMUser",
+        "source_ip": "198.51.100.203",
+        "user_agent": "console.amazonaws.com",
+        "resources": ["OrgDeploymentRole"],
+        "request_parameters": {
+            "roleName": "OrgDeploymentRole",
+            "policyDocument": (
+                '{"Statement":[{"Effect":"Allow","Principal":'
+                f'{{"AWS":"arn:aws:iam::{PROD}:user/svc-deploy-bot"}},'
+                '"Action":"sts:AssumeRole"}]}'
+            ),
+        },
+    },
+    {
+        "account_id": SHARED,
+        "event_id": "6f7a8b9c-0d1e-2f3a-4b5c-6d7e8f901234",
+        "event_name": "AttachRolePolicy",
+        "event_time": _days_ago(12),
+        "actor_arn": f"arn:aws:iam::{SHARED}:user/platform-admin",
+        "actor_type": "IAMUser",
+        "source_ip": "198.51.100.203",
+        "user_agent": "console.amazonaws.com",
+        "resources": ["OrgDeploymentRole"],
+        "request_parameters": {
+            "roleName": "OrgDeploymentRole",
+            "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess",
+        },
+    },
+    {
+        "account_id": SANDBOX,
+        "event_id": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f90123456",
+        "event_name": "CreateBucket",
+        "event_time": _days_ago(6),
+        "actor_arn": f"arn:aws:iam::{SANDBOX}:user/dev-sandbox-user",
+        "actor_type": "IAMUser",
+        "source_ip": "192.0.2.88",
+        "user_agent": "aws-cli/2.15.30",
+        "resources": ["sandbox-scratch"],
+        "request_parameters": {"bucketName": "sandbox-scratch"},
+    },
+]
+
+
 ACCOUNTS_BY_ID = {a["id"]: a for a in ACCOUNTS}
 PRIMARY_ACCOUNT = ACCOUNTS[0]
 
