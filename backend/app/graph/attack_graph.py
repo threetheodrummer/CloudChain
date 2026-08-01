@@ -61,6 +61,7 @@ _RELATION_TEMPLATES = {
     "including {tgt}, into a new Lambda function or EC2 instance",
     "can_assume_cross_account": "{src} is named in the trust policy of {tgt} and can cross the "
     "account boundary with sts:AssumeRole",
+    "can_escalate_to_admin": "{src} holds IAM write permissions and can grant itself {tgt}",
     "grants_admin_access": "{src} is granted AdministratorAccess ({tgt})",
     "has_admin_policy": "{src} directly holds an unrestricted (*:*) policy, i.e. {tgt}",
 }
@@ -176,7 +177,15 @@ def _wire_privilege_escalation(g: nx.DiGraph, by_issue: Dict[str, List[Finding]]
 
     for f in by_issue.get("IAM_PRIVILEGE_ESCALATION_RISK", []):
         acct = f.account_id
-        user_node = node_id("iam_user", f.resource_id, acct)
+        user_node = node_id(f.resource_type, f.resource_id, acct)
+
+        # Self-escalation needs no target role: the identity grants itself.
+        # This is a *route to* admin, not a statement that it already has admin,
+        # which is why it gets its own relation rather than reusing
+        # has_admin_policy.
+        if f.evidence.get("self_escalation_actions"):
+            g.add_edge(user_node, admin_sink(acct), relation="can_escalate_to_admin")
+
         for target in f.evidence.get("pass_role_targets", []):
             if target == "*":
                 for role_node in admin_roles_by_account.get(acct, set()):
@@ -355,7 +364,14 @@ def find_escalation_paths(
                 continue
             for raw in raw_paths:
                 if len(raw) < 3:
-                    continue  # already an administrator, not an escalation
+                    # A single hop straight to the admin sink is usually
+                    # has_admin_policy -- the identity already *is* an
+                    # administrator, which isn't an escalation. But a
+                    # can_escalate_to_admin edge is exactly an escalation in one
+                    # step, and dropping it would hide the most direct route
+                    # there is.
+                    if g.edges[raw[0], raw[1]]["relation"] != "can_escalate_to_admin":
+                        continue
                 paths.append(_build_path(g, raw, entry_kind="identity"))
 
     return paths

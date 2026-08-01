@@ -17,6 +17,7 @@ from typing import List, Set, Tuple
 
 from app.config import settings
 from app.models import Finding, Severity
+from app.scanners import policy
 from app.sources import AWSDataSource
 
 COMPUTE_CREATE_ACTIONS = {
@@ -149,54 +150,113 @@ class IAMScanner:
             # Resolved through the identity rather than by policy name, so
             # customer-managed and inline policies are actually read.
             statements = self.source.get_identity_policy_statements("user", user)
-            actions: Set[str] = {a for a, _ in statements}
-
-            if ("*", "*") in statements:
+            full_admin = policy.is_full_admin(statements)
+            if policy.is_admin_equivalent(statements):
                 findings.append(
                     Finding(
                         resource_id=user,
                         resource_type="iam_user",
                         issue_code="IAM_OVERPERMISSIVE_POLICY",
-                        title=f"IAM user '{user}' has a wildcard (*:*) policy attached",
-                        description=f"Attached polic{'y' if len(policy_names)==1 else 'ies'} {policy_names} grant unrestricted access.",
-                        base_severity=Severity.CRITICAL,
-                        remediation="Replace with a least-privilege policy scoped to the specific actions/resources this identity needs.",
-                        evidence={"policies": policy_names},
-                    )
-                )
-
-            has_passrole = "iam:PassRole" in actions
-            has_compute_create = bool(actions & COMPUTE_CREATE_ACTIONS)
-            if has_passrole and has_compute_create:
-                pass_role_targets = [
-                    _extract_role_name(r) for a, r in statements if a == "iam:PassRole"
-                ]
-                findings.append(
-                    Finding(
-                        resource_id=user,
-                        resource_type="iam_user",
-                        issue_code="IAM_PRIVILEGE_ESCALATION_RISK",
-                        title=f"IAM user '{user}' can escalate privileges via PassRole + compute creation",
+                        title=(
+                            f"IAM user '{user}' has a wildcard (*:*) policy attached"
+                            if full_admin
+                            else f"IAM user '{user}' has full control of IAM, which is "
+                            f"administrator access in one step"
+                        ),
                         description=(
-                            "This identity holds iam:PassRole together with a compute-creation "
-                            "action (Lambda/EC2). It can pass an over-privileged role into a new "
-                            "function/instance and run code as that role -- a well-known AWS "
-                            "privilege escalation primitive."
+                            f"Attached polic{'y' if len(policy_names) == 1 else 'ies'} "
+                            f"{policy_names} grant unrestricted access."
+                            if full_admin
+                            else "This identity can perform any IAM action on any resource. It "
+                            "can attach AdministratorAccess to itself, so the distinction "
+                            "between this and being an administrator is one API call."
                         ),
                         base_severity=Severity.CRITICAL,
                         remediation=(
-                            "Scope iam:PassRole to specific role ARNs with a condition, and remove "
-                            "compute-creation permissions this identity doesn't need."
+                            "Replace with a least-privilege policy scoped to the specific "
+                            "actions/resources this identity needs."
                         ),
                         evidence={
                             "policies": policy_names,
-                            "pass_role_targets": pass_role_targets,
-                            "compute_actions": sorted(actions & COMPUTE_CREATE_ACTIONS),
+                            "full_admin": full_admin,
+                            "granted_actions": policy.summarise_actions(statements),
                         },
                     )
                 )
 
+            findings.extend(
+                self._escalation_findings("iam_user", user, policy_names, statements)
+            )
+
         return findings
+
+    def _escalation_findings(
+        self,
+        resource_type: str,
+        name: str,
+        policy_names: List[str],
+        statements: List[Tuple[str, str]],
+    ) -> List[Finding]:
+        """Ways this identity can reach administrator that aren't simply having it.
+
+        Two distinct mechanisms, reported as one issue code with evidence saying
+        which applies:
+
+          - PassRole into an over-privileged role, plus a compute action to run
+            code as it. Needs a target role, so the graph draws an edge to it.
+          - Self-escalation via IAM write permissions (attach a policy, publish a
+            policy version, mint another user's access key...). No target role is
+            involved -- the identity grants itself.
+        """
+        has_passrole = policy.grants(statements, "iam:PassRole")
+        compute = sorted(a for a in COMPUTE_CREATE_ACTIONS if policy.grants(statements, a))
+        primitives = policy.find_escalation_primitives(statements)
+
+        # An identity that already holds admin hasn't escalated to it.
+        if policy.is_full_admin(statements):
+            return []
+        if not ((has_passrole and compute) or primitives):
+            return []
+
+        reasons: List[str] = []
+        if has_passrole and compute:
+            reasons.append(
+                f"holds iam:PassRole together with {', '.join(compute)}, so it can pass an "
+                f"over-privileged role into new compute and run code as that role"
+            )
+        for action, why in primitives:
+            reasons.append(f"holds {action}, so it {why}")
+
+        pass_role_targets = (
+            [_extract_role_name(r) for r in policy.granted_resources(statements, "iam:PassRole")]
+            if has_passrole and compute
+            else []
+        )
+
+        label = "IAM user" if resource_type == "iam_user" else "IAM role"
+        return [
+            Finding(
+                resource_id=name,
+                resource_type=resource_type,
+                issue_code="IAM_PRIVILEGE_ESCALATION_RISK",
+                title=f"{label} '{name}' can escalate to administrator access",
+                description=(
+                    f"This identity {'; and '.join(reasons)}. Each of these is a documented "
+                    f"AWS privilege-escalation path."
+                ),
+                base_severity=Severity.CRITICAL,
+                remediation=(
+                    "Scope iam:PassRole to specific role ARNs with a condition, and remove IAM "
+                    "write permissions this identity doesn't need."
+                ),
+                evidence={
+                    "policies": policy_names,
+                    "pass_role_targets": pass_role_targets,
+                    "compute_actions": compute,
+                    "self_escalation_actions": [a for a, _ in primitives],
+                },
+            )
+        ]
 
     def _scan_roles(self) -> List[Finding]:
         findings: List[Finding] = []
@@ -205,7 +265,12 @@ class IAMScanner:
             statements = self.source.get_identity_policy_statements("role", role)
             aws_managed = is_aws_managed_role(role)
 
-            if ("*", "*") in statements:
+            if not aws_managed:
+                findings.extend(
+                    self._escalation_findings("iam_role", role, policy_names, statements)
+                )
+
+            if policy.is_admin_equivalent(statements):
                 findings.append(
                     Finding(
                         resource_id=role,
@@ -266,7 +331,7 @@ class IAMScanner:
         if not external:
             return []
 
-        is_admin = ("*", "*") in statements
+        is_admin = policy.is_admin_equivalent(statements)
         aws_managed = is_aws_managed_role(role)
 
         if aws_managed:

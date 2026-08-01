@@ -155,6 +155,7 @@ CloudChain/
       demo/mock_aws.py    # seeded synthetic AWS *organisation* (3 accounts)
       scanners/           # S3, IAM, security group checks -> Finding objects
       graph/              # networkx attack-path engine, account-namespaced
+      scanners/policy.py  # wildcard-aware IAM action matching + escalation primitives
       risk/scoring.py     # per-finding contextual score + its derivation
       risk/posture.py     # 0-100 account posture, decomposed into four dimensions
       validation/         # re-check a reported path against the account, read-only
@@ -164,7 +165,7 @@ CloudChain/
       report/generator.py # assembles the final JSON report
       report/pdf.py       # renders that same report as a downloadable PDF
     Dockerfile
-    tests/                # 157 tests; fixtures/ holds sample Terraform plans
+    tests/                # 181 tests; fixtures/ holds sample Terraform plans
   frontend/
     src/
       components/
@@ -444,7 +445,7 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-157 tests covering scanner logic, attack-path graph construction, cross-account
+181 tests covering scanner logic, attack-path graph construction, cross-account
 correlation, risk scoring, the posture engine's explainability contract,
 path validation and its safety guarantees, CloudTrail attribution, Terraform
 plan parity, escalation-route discovery, PDF export, drift detection, and the
@@ -486,6 +487,10 @@ Worth being able to state plainly — most of these are deliberate.
   VPC flow logs, EBS snapshots and instance metadata are all out of scope —
   confirmed by pointing CloudChain at rooms built around each of them and
   correctly getting nothing back.
+- **Explicit Deny, SCPs, permission boundaries and condition keys are not
+  modelled.** All four can make a grant that looks live actually unusable, so a
+  permission finding is a *claim* — which is precisely why the validation engine
+  exists to re-check it rather than trusting the analysis.
 - **Key age can't be tested in an ephemeral lab.** `IAM_STALE_ACCESS_KEY` needs
   a key older than 90 days. Training environments are provisioned minutes before
   you scan them, so the check correctly finds nothing there — a limitation of
