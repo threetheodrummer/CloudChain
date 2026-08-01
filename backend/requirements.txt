@@ -9,3 +9,6 @@ pydantic>=2.9.0
 python-dateutil>=2.9.0
 pytest>=8.3.2
 httpx>=0.27.2
+# PDF report export. Pure Python -- chosen over WeasyPrint/wkhtmltopdf, which
+# need cairo/pango/Qt system libraries and would roughly double the container.
+reportlab>=4.2.0

@@ -13,12 +13,30 @@ from pathlib import Path
 import pytest
 
 from app.graph import build_attack_graph, find_escalation_paths
-from app.models import Finding, Severity
+from app.models import Finding, ScanResult, Severity
 from app.pipeline import analyse_sources
 from app.terraform import PlanDataSource, analyse_plan, parse_plan
 from app.terraform.analyzer import format_pr_comment
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _as_baseline(result):
+    """Turn an analyse_sources() result into a stored-scan baseline.
+
+    Copies every field the posture engine reads -- including escalation_paths.
+    Omitting one would score the baseline and the plan under different rules and
+    produce a meaningless delta.
+    """
+
+    return ScanResult(
+        scan_id="baseline",
+        mode="demo",
+        findings=result.findings,
+        attack_paths=result.attack_paths,
+        escalation_paths=result.escalation_paths,
+        graph=result.graph,
+    )
 
 
 def _plan(name):
@@ -164,17 +182,10 @@ def test_safe_plan_passes(safe):
 def test_verdict_is_a_diff_not_an_absolute_judgement(risky):
     """Re-running against a baseline that already contains the risk must not
     block: the change introduced nothing new."""
-    from app.models import ScanResult
 
     src = PlanDataSource(risky, account_id="111111111111", account_name="prod")
     already = analyse_sources([src], scan_id="baseline", mode="demo")
-    baseline = ScanResult(
-        scan_id="baseline",
-        mode="demo",
-        findings=already.findings,
-        attack_paths=already.attack_paths,
-        graph=already.graph,
-    )
+    baseline = _as_baseline(already)
 
     analysis = analyse_plan(risky, baseline=baseline, account_id="111111111111")
     assert analysis["verdict"] == "PASS"
@@ -182,17 +193,10 @@ def test_verdict_is_a_diff_not_an_absolute_judgement(risky):
 
 
 def test_removing_risk_is_reported_as_an_improvement(risky, safe):
-    from app.models import ScanResult
 
     src = PlanDataSource(risky, account_id="111111111111", account_name="prod")
     before = analyse_sources([src], scan_id="baseline", mode="demo")
-    baseline = ScanResult(
-        scan_id="baseline",
-        mode="demo",
-        findings=before.findings,
-        attack_paths=before.attack_paths,
-        graph=before.graph,
-    )
+    baseline = _as_baseline(before)
 
     analysis = analyse_plan(safe, baseline=baseline, account_id="111111111111")
     assert analysis["verdict"] == "PASS"
@@ -281,17 +285,10 @@ def test_posture_delta_is_withheld_when_scopes_differ(risky):
 
 
 def test_posture_delta_is_reported_when_scopes_match(risky, safe):
-    from app.models import ScanResult
 
     src = PlanDataSource(risky, account_id="111111111111", account_name="prod")
     before = analyse_sources([src], scan_id="baseline", mode="demo")
-    baseline = ScanResult(
-        scan_id="baseline",
-        mode="demo",
-        findings=before.findings,
-        attack_paths=before.attack_paths,
-        graph=before.graph,
-    )
+    baseline = _as_baseline(before)
 
     analysis = analyse_plan(risky, baseline=baseline, account_id="111111111111")
     assert analysis["posture"]["comparable"] is True

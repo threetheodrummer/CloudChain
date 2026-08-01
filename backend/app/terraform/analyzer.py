@@ -36,11 +36,14 @@ VERDICT_PASS = "PASS"
 
 
 def _escalation_paths(scan: ScanResult) -> List[AttackPath]:
-    """Identity-to-admin routes, recomputed from the scan's findings.
+    """Identity-to-admin routes for a scan.
 
-    Rebuilt rather than stored so the plan and the baseline are always compared
-    using the same version of the graph rules.
+    Scans produced by the current pipeline carry these already. Older stored
+    scans predate the field, so they're recomputed -- which also guarantees the
+    plan and the baseline are compared under the same graph rules.
     """
+    if scan.escalation_paths:
+        return list(scan.escalation_paths)
     graph, by_resource = build_attack_graph(scan.findings)
     return find_escalation_paths(graph, by_resource)
 
@@ -171,9 +174,13 @@ def analyse_plan(
     )
     partial_scope = bool(baseline_resources - in_scope)
 
-    planned_posture = compute_posture(planned.findings, planned.attack_paths, planned.graph)
+    planned_posture = compute_posture(
+        planned.findings, planned.attack_paths, planned.graph, planned.escalation_paths
+    )
     baseline_posture = (
-        compute_posture(baseline.findings, baseline.attack_paths, baseline.graph)
+        compute_posture(
+            baseline.findings, baseline.attack_paths, baseline.graph, baseline.escalation_paths
+        )
         if baseline
         else None
     )

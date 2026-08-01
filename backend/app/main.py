@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,7 @@ from app.jobs import get_job, start_scan
 from app.models import ScanResult
 from app.pipeline import run_scan
 from app.report.generator import build_report
+from app.report.pdf import build_report_pdf
 from app.sources import get_data_sources, validate_credentials
 from app.storage import compare_scans, get_previous_scan, get_scan, list_scans
 from app.terraform import analyse_plan
@@ -151,6 +152,22 @@ def scan_report(scan_id: str):
     return build_report(result)
 
 
+@app.get("/api/scans/{scan_id}/report.pdf")
+def scan_report_pdf(scan_id: str):
+    """The report as a PDF, built from the same dict the dashboard renders."""
+    result = get_scan(scan_id)
+    if result is None:
+        raise HTTPException(404, detail="scan not found")
+
+    pdf = build_report_pdf(build_report(result))
+    filename = f"cloudchain-{scan_id}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.post("/api/scans/{scan_id}/validate")
 def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
     """Re-check every attack path in a stored scan against the account.
@@ -166,7 +183,10 @@ def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
     if result is None:
         raise HTTPException(404, detail="scan not found")
 
-    if not result.attack_paths:
+    # Escalation chains are validated too: their hops use the same relations,
+    # and "is this still true?" is just as worth asking of a latent primitive.
+    paths = list(result.attack_paths) + list(result.escalation_paths)
+    if not paths:
         return {"scan_id": scan_id, "mode": result.mode, "validations": []}
 
     if result.mode == "real":
@@ -197,7 +217,7 @@ def validate_scan_paths(scan_id: str, creds: Optional[AWSCredentials] = None):
         session_token=(creds.session_token or None) if creds else None,
     )
 
-    validations = validate_paths(result.attack_paths, sources, result.graph)
+    validations = validate_paths(paths, sources, result.graph)
     return {
         "scan_id": scan_id,
         "mode": result.mode,

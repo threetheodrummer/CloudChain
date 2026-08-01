@@ -5,8 +5,7 @@ import RiskGauge from '../RiskGauge/RiskGauge';
 import AttackGraph from '../AttackGraph/AttackGraph';
 import PathValidation from '../PathValidation/PathValidation';
 import Attribution from '../Attribution/Attribution';
-import { attributeScanFindings, validateScanPaths } from '../../api/client';
-import { downloadHtml } from '../../lib/downloadReport';
+import { attributeScanFindings, downloadReportPdf, validateScanPaths } from '../../api/client';
 import './Dashboard.css';
 
 const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
@@ -107,7 +106,15 @@ const FindingRow = ({ finding, open, onToggle }) => {
 };
 
 const Dashboard = ({ report, onNewScan }) => {
-  const { summary, attack_paths: attackPaths, top_findings: topFindings, drift, posture, graph } = report;
+  const {
+    summary,
+    attack_paths: attackPaths,
+    escalation_paths: escalationPaths = [],
+    top_findings: topFindings,
+    drift,
+    posture,
+    graph
+  } = report;
   const [openFinding, setOpenFinding] = useState(null);
 
   // Validation is on demand rather than part of the scan: it costs a second
@@ -116,6 +123,21 @@ const Dashboard = ({ report, onNewScan }) => {
   const [validations, setValidations] = useState({});
   const [validating, setValidating] = useState(false);
   const [validationError, setValidationError] = useState('');
+
+  const [downloading, setDownloading] = useState(false);
+
+  const runDownload = async () => {
+    setDownloading(true);
+    try {
+      await downloadReportPdf(report.scan_id);
+    } catch (err) {
+      // A failed export shouldn't be silent, but it also shouldn't take the
+      // dashboard down -- the data is all still on screen.
+      window.alert(`Could not build the PDF: ${err.message}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // Attribution costs a round of CloudTrail lookups, so it's on demand too.
   const [attribution, setAttribution] = useState(null);
@@ -159,8 +181,13 @@ const Dashboard = ({ report, onNewScan }) => {
         <div className="app-shell__header-right">
           <span className="app-shell__mode-badge">{report.mode} mode</span>
           <div className="app-shell__downloads">
-            <button type="button" className="app-shell__download" onClick={() => downloadHtml(report)}>
-              Download report
+            <button
+              type="button"
+              className="app-shell__download"
+              onClick={runDownload}
+              disabled={downloading}
+            >
+              {downloading ? 'Building PDF…' : 'Download report'}
             </button>
           </div>
           <button type="button" className="app-shell__new-scan" onClick={onNewScan}>
@@ -307,6 +334,46 @@ const Dashboard = ({ report, onNewScan }) => {
         </div>
         </GlowPanel>
       </section>
+
+      {escalationPaths.length > 0 && (
+        <section className="app-shell__escalation">
+          <h2>Escalation routes</h2>
+          <p className="app-shell__hint">
+            No unauthenticated attacker can walk these. They open once the starting
+            identity is compromised — a latent privilege-escalation primitive, not a
+            live breach route.
+          </p>
+          {escalationPaths.map((p) => (
+            <GlowPanel tone="amber" radius={12} key={p.path_id} className="path-card-glow">
+              <div className="path-card">
+                <div className="path-card__tags">
+                  <span className="path-card__escalation">Escalation</span>
+                  {p.crosses_accounts && (
+                    <span className="path-card__cross" title={(p.accounts || []).join(' → ')}>
+                      crosses {(p.accounts || []).length} accounts
+                    </span>
+                  )}
+                </div>
+                <ol className="path-card__steps">
+                  {p.steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+                <p className="path-card__outcome">
+                  Result: administrator access, starting from a compromised identity.
+                </p>
+
+                <PathValidation
+                  validation={validations[p.path_id]}
+                  onValidate={runValidation}
+                  loading={validating}
+                  error={validationError}
+                />
+              </div>
+            </GlowPanel>
+          ))}
+        </section>
+      )}
 
       <section className="app-shell__attribution">
         <h2>Who changed this</h2>

@@ -90,6 +90,39 @@ export async function attributeScanFindings(scanId, { limit = 25, onlyNew = fals
   return handle(res);
 }
 
+/**
+ * Download the report as a PDF.
+ *
+ * The document is rendered server-side from the same report the dashboard is
+ * showing, so the file and the screen can never disagree. Fetched as a blob
+ * rather than opened in a tab so the browser saves it with our filename
+ * instead of displaying it in the built-in viewer.
+ */
+export async function downloadReportPdf(scanId) {
+  const res = await fetch(`${BASE}/scans/${scanId}/report.pdf`);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body && body.detail) detail = body.detail;
+    } catch {
+      // not JSON; keep the status line
+    }
+    throw new Error(detail);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cloudchain-${scanId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick so Firefox doesn't cancel the in-flight download.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 export async function getHealth() {
   const res = await fetch(`${BASE}/health`);
   return handle(res);

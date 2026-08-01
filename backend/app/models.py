@@ -175,7 +175,13 @@ class ScanResult(BaseModel):
     mode: str  # demo | real
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     findings: List[ScoredFinding] = Field(default_factory=list)
+    # Routes an unauthenticated attacker can walk: internet entry point to admin.
     attack_paths: List[AttackPath] = Field(default_factory=list)
+    # Routes that open once an identity is compromised. Kept in a separate field
+    # rather than merged, because an escalation primitive is latent risk and a
+    # live breach route is not -- conflating them overstates the first and
+    # understates the second.
+    escalation_paths: List[AttackPath] = Field(default_factory=list)
     graph: ScanGraph = Field(default_factory=ScanGraph)
 
     @property

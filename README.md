@@ -25,6 +25,14 @@ which can pass into a role with `AdministratorAccess` — that's not three
 unrelated findings, it's one attack path, and CloudChain reports it as such
 with a plain-English narrative.
 
+Two kinds of route are reported, kept deliberately separate. **Attack paths**
+start at an internet entry point and can be walked by an unauthenticated
+attacker. **Escalation routes** start at an ordinary IAM identity and open
+only once that identity is compromised. Merging them would overstate the
+second and understate the first, so they get separate sections, separate
+scoring floors, and a latent primitive can never score as badly as an open
+door.
+
 **2. Validated paths, not asserted ones.** Wiz, Orca and Prisma Cloud all
 derive attack paths from configuration analysis and present them as fact. The
 path is a *model output*, not an observation, and security teams know it — a
@@ -153,9 +161,10 @@ CloudChain/
       attribution/        # CloudTrail: who made the change, and when
       terraform/          # plan parsing, plan-as-data-source, pre-deploy diff
       storage/            # SQLite snapshot persistence + drift diffing
-      report/             # assembles the final JSON report
+      report/generator.py # assembles the final JSON report
+      report/pdf.py       # renders that same report as a downloadable PDF
     Dockerfile
-    tests/                # 113 tests; fixtures/ holds sample Terraform plans
+    tests/                # 134 tests; fixtures/ holds sample Terraform plans
   frontend/
     src/
       components/
@@ -172,7 +181,6 @@ CloudChain/
         About/             # how it works / risk scoring / attack paths
         Aurora, CircularText, CardNav, TopNav, VariableProximity,
         Wordmark, GlowPanel, BorderGlow, CursorGrid, LoadingScreen
-      lib/downloadReport.js  # self-contained HTML report export
       api/client.js          # fetch wrappers + scan job polling
       App.jsx                # view state machine
 ```
@@ -301,6 +309,11 @@ The account needs read-only permissions for S3, IAM, and EC2 (the `SecurityAudit
 managed policy covers it). Missing permissions degrade gracefully with a warning
 instead of crashing the scan.
 
+[`docs/testing-against-real-aws.md`](docs/testing-against-real-aws.md) walks
+through validating real mode against a free-tier account end to end — IAM setup,
+cost safety, what a clean account should look like, and an optional seeded
+escalation chain so there's something for the graph engine to find.
+
 ### API endpoints
 
 | Method | Path | Description |
@@ -312,6 +325,7 @@ instead of crashing the scan.
 | GET | `/api/scans?mode=demo` | List past scans |
 | GET | `/api/scans/{scan_id}` | Full raw scan result (incl. graph) |
 | GET | `/api/scans/{scan_id}/report` | Report view of a specific past scan |
+| GET | `/api/scans/{scan_id}/report.pdf` | The same report as a downloadable PDF |
 | POST | `/api/scans/{scan_id}/validate` | Re-check every attack path, read-only |
 | POST | `/api/scans/{scan_id}/attribute` | Name the actor and API call behind each finding |
 | POST | `/api/plan/analyze` | Analyse a Terraform plan and diff it against a scan |
@@ -430,10 +444,11 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-113 tests covering scanner logic, attack-path graph construction, cross-account
+134 tests covering scanner logic, attack-path graph construction, cross-account
 correlation, risk scoring, the posture engine's explainability contract,
 path validation and its safety guarantees, CloudTrail attribution, Terraform
-plan parity, drift detection, and the background job runner.
+plan parity, escalation-route discovery, PDF export, drift detection, and the
+background job runner.
 
 A few are worth reading as documentation of intent:
 
@@ -467,15 +482,19 @@ Worth being able to state plainly — most of these are deliberate.
   return the safe answer and stay quiet in CI rather than flagging every pull
   request for something the author can't fix from Terraform. The post-apply
   scan still covers them.
-- **`get_policy_statements` resolves AWS-managed policies by name.**
-  Customer-managed and inline policies would need full ARN resolution for
-  parity in real accounts (noted directly in `sources.py`).
-- **Coverage is S3 + IAM + EC2 security groups.** RDS, Lambda, KMS and
-  CloudTrail would be natural extensions.
-- **Escalation paths are not shown in the live dashboard.** They're computed
-  for plan checking, where the question "could this identity make itself an
-  admin?" is the useful gate. Surfacing them alongside internet-entry paths in
-  the UI would need care not to conflate a latent primitive with a live breach.
+- **Coverage is S3 + IAM + EC2 security groups.** RDS, Lambda, KMS, NACLs,
+  VPC flow logs, EBS snapshots and instance metadata are all out of scope —
+  confirmed by pointing CloudChain at rooms built around each of them and
+  correctly getting nothing back.
+- **AWS service-managed roles are over-reported.** `OrganizationAccountAccessRole`
+  and CloudFormation StackSets execution roles trust the organisation's
+  management account *by design*, and CloudChain currently flags that as a
+  CRITICAL cross-account trust. On a real org account these dominate the report
+  and bury the genuine findings. Recognising AWS-created roles is the next fix.
+- **Policies are resolved by name, AWS-managed only.** `get_policy_statements`
+  can't read customer-managed or inline policy documents, so an identity whose
+  over-privilege lives in one of those looks clean. This was confirmed against
+  a real account, not just noted in theory.
 - **Attribution reaches back 90 days.** `LookupEvents` reads CloudTrail's event
   history, not a trail's S3 archive. Going further would mean querying the
   archive with Athena, which is a different (and much slower) shape of

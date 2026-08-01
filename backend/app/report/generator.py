@@ -48,7 +48,9 @@ def _finding_dict(f) -> Dict[str, Any]:
 def build_report(scan: ScanResult, drift: Optional[DriftReport] = None) -> Dict[str, Any]:
     # The graph is passed through so the posture engine can measure blast radius
     # (how much of the estate an attacker reaches from the exposed entry points).
-    posture = compute_posture(scan.findings, scan.attack_paths, scan.graph)
+    posture = compute_posture(
+        scan.findings, scan.attack_paths, scan.graph, scan.escalation_paths
+    )
 
     return {
         "scan_id": scan.scan_id,
@@ -75,8 +77,25 @@ def build_report(scan: ScanResult, drift: Optional[DriftReport] = None) -> Dict[
                 "node_ids": p.node_ids,
                 "crosses_accounts": p.crosses_accounts,
                 "accounts": p.accounts,
+                "entry_kind": p.entry_kind,
             }
             for p in scan.attack_paths
+        ],
+        # Reported separately from attack_paths so the UI can say "an attacker
+        # can walk this today" and "this opens if an identity is compromised"
+        # without implying they are the same thing.
+        "escalation_paths": [
+            {
+                "path_id": p.path_id,
+                "severity": p.severity.value,
+                "narrative": p.narrative,
+                "steps": p.steps,
+                "node_ids": p.node_ids,
+                "crosses_accounts": p.crosses_accounts,
+                "accounts": p.accounts,
+                "entry_kind": p.entry_kind,
+            }
+            for p in scan.escalation_paths
         ],
         # Graph is included so the frontend can draw the attack path without a
         # second request.

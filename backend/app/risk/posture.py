@@ -89,7 +89,11 @@ PRIVILEGE_SATURATION = 40.0
 
 # Reachability is scored from the existence and shape of confirmed paths.
 # The four terms sum to exactly 1.00 at worst case.
-REACHABILITY_PATH_EXISTS = 0.60  # any proven route to admin
+REACHABILITY_PATH_EXISTS = 0.60  # a route an unauthenticated attacker can walk
+# A route that only opens once some identity is compromised. Lower than the
+# internet floor on purpose, and capped below it even after the bonuses below,
+# so a latent primitive can never score as badly as an open door.
+REACHABILITY_ESCALATION_ONLY = 0.35
 REACHABILITY_CROSS_ACCOUNT = 0.15  # at least one chain spans two accounts
 REACHABILITY_SHORT_CHAIN = 0.15  # shortest route is <= SHORT_CHAIN_HOPS
 REACHABILITY_MULTI_PATH = 0.10  # several independent routes
@@ -226,19 +230,100 @@ def _privilege(findings: Sequence[ScoredFinding]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
-def _reachability(attack_paths: Sequence[AttackPath]) -> Dict[str, Any]:
-    if not attack_paths:
+def _escalation_only_reachability(escalation_paths: Sequence[AttackPath]) -> Dict[str, Any]:
+    """Reachability when the only routes to admin start from an identity.
+
+    Capped below the internet-entry maximum on purpose: an escalation primitive
+    is latent risk, not an open door.
+    """
+    raw = REACHABILITY_ESCALATION_ONLY
+    starts = sorted({p.node_ids[0] for p in escalation_paths})
+    factors = [
+        _factor(
+            "Identity can escalate to AdministratorAccess",
+            f"{len(escalation_paths)} chain(s) from {len(starts)} identity/identities reach "
+            f"admin once that identity is compromised",
+            REACHABILITY_ESCALATION_ONLY,
+        )
+    ]
+
+    crossing = [p for p in escalation_paths if p.crosses_accounts]
+    if crossing:
+        raw += REACHABILITY_CROSS_ACCOUNT
+        involved = sorted({a for p in crossing for a in p.accounts})
+        factors.append(
+            _factor(
+                "Crosses an account boundary",
+                f"{len(crossing)} chain(s) span {len(involved)} accounts "
+                f"({', '.join(involved)})",
+                REACHABILITY_CROSS_ACCOUNT,
+            )
+        )
+
+    multi = _clamp01((len(starts) - 1) / max(MULTI_PATH_SATURATION - 1, 1))
+    contribution = round(REACHABILITY_MULTI_PATH * multi, 4)
+    raw += contribution
+    factors.append(
+        _factor(
+            "Independent starting identities",
+            f"{len(starts)} identity/identities can each reach admin independently",
+            contribution,
+        )
+    )
+
+    return _component(
+        "reachability",
+        "Reachability",
+        raw,
+        (
+            f"No internet-reachable route, but {len(escalation_paths)} escalation chain(s) "
+            f"reach AdministratorAccess from {len(starts)} identity/identities."
+        ),
+        (
+            f"No unauthenticated route exists, so this scores from a lower floor of "
+            f"{REACHABILITY_ESCALATION_ONLY:.2f} rather than "
+            f"{REACHABILITY_PATH_EXISTS:.2f} -- an escalation primitive only pays off "
+            f"once an identity is already compromised. Add "
+            f"{REACHABILITY_CROSS_ACCOUNT:.2f} if a chain crosses accounts and up to "
+            f"{REACHABILITY_MULTI_PATH:.2f} for multiple independent starting identities. "
+            f"Total = {_clamp01(raw):.2f}."
+        ),
+        factors,
+    )
+
+
+def _reachability(
+    attack_paths: Sequence[AttackPath],
+    escalation_paths: Sequence[AttackPath] = (),
+) -> Dict[str, Any]:
+    """Score how reachable AdministratorAccess is.
+
+    Two kinds of route count, and they are deliberately not worth the same.
+    An internet-entry chain is a live breach route. An escalation chain only
+    pays off once some identity is already compromised -- serious, but a
+    different state, and a score that treats them identically overstates risk.
+
+    So escalation-only accounts start from a lower floor and can never reach
+    the same maximum as a chain an unauthenticated attacker can walk.
+    """
+    if not attack_paths and not escalation_paths:
         return _component(
             "reachability",
             "Reachability",
             0.0,
-            "No confirmed path from an internet entry point to AdministratorAccess.",
+            "No route to AdministratorAccess, from the internet or from any single identity.",
             (
-                "The graph engine found no simple path from any internet-exposed entry "
-                "point to the AdministratorAccess sink, so this dimension deducts nothing."
+                "The graph engine found no simple path to an AdministratorAccess sink "
+                "from an internet-exposed entry point, and no identity that could "
+                "escalate to one. This dimension deducts nothing."
             ),
             [],
         )
+
+    # Escalation-only: no unauthenticated route exists, but at least one
+    # identity could make itself an administrator.
+    if not attack_paths:
+        return _escalation_only_reachability(escalation_paths)
 
     raw = REACHABILITY_PATH_EXISTS
     factors = [
@@ -249,6 +334,16 @@ def _reachability(attack_paths: Sequence[AttackPath]) -> Dict[str, Any]:
             REACHABILITY_PATH_EXISTS,
         )
     ]
+
+    if escalation_paths:
+        factors.append(
+            _factor(
+                "Escalation routes also present",
+                f"{len(escalation_paths)} identity-to-admin chain(s) exist alongside the "
+                f"internet-reachable route(s); already counted by the floor above",
+                0.0,
+            )
+        )
 
     crossing = [p for p in attack_paths if p.crosses_accounts]
     if crossing:
@@ -414,12 +509,14 @@ def compute_posture(
     findings: List[ScoredFinding],
     attack_paths: List[AttackPath],
     graph: Optional[ScanGraph] = None,
+    escalation_paths: Optional[List[AttackPath]] = None,
 ) -> Dict[str, Any]:
     """Produce the 0-100 posture score together with its full derivation."""
+    escalation_paths = escalation_paths or []
     components = [
         _exposure(findings),
         _privilege(findings),
-        _reachability(attack_paths),
+        _reachability(attack_paths, escalation_paths),
         _blast_radius(findings, graph),
     ]
 

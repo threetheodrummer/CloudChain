@@ -15,7 +15,13 @@ import uuid
 from typing import Callable, List, Optional, Tuple
 
 from app.config import settings
-from app.graph import build_attack_graph, find_attack_paths, finding_ids_on_paths, to_scan_graph
+from app.graph import (
+    build_attack_graph,
+    find_attack_paths,
+    find_escalation_paths,
+    finding_ids_on_paths,
+    to_scan_graph,
+)
 from app.models import DriftReport, Finding, ScanResult
 from app.risk import score_findings
 from app.scanners import IAMScanner, S3Scanner, SecurityGroupScanner
@@ -87,9 +93,24 @@ def analyse_sources(
     step("graph", f"{len(findings)} findings across {len(sources)} account(s)")
     graph, findings_by_resource = build_attack_graph(findings)
     attack_paths = find_attack_paths(graph, findings_by_resource)
+
+    # Identity-to-admin routes are computed for every scan, not just for
+    # Terraform plan checking. Most real accounts have no internet entry point
+    # at all, so reporting only internet-reachable chains means reporting
+    # nothing -- which is exactly what happened the first time CloudChain was
+    # pointed at a deliberately vulnerable account.
+    escalation_paths = find_escalation_paths(graph, findings_by_resource)
+
+    # Only internet-reachable chains boost a finding's risk score. An
+    # escalation primitive is real but conditional, and the 2.5x multiplier is
+    # calibrated for "an unauthenticated attacker can reach this".
     ids_in_path = finding_ids_on_paths(attack_paths, findings_by_resource)
 
-    step("score", f"{len(attack_paths)} attack path(s) found")
+    step(
+        "score",
+        f"{len(attack_paths)} internet-reachable path(s), "
+        f"{len(escalation_paths)} escalation path(s)",
+    )
     scored = score_findings(findings, ids_in_path)
 
     return ScanResult(
@@ -97,6 +118,7 @@ def analyse_sources(
         mode=mode,
         findings=scored,
         attack_paths=attack_paths,
+        escalation_paths=escalation_paths,
         graph=to_scan_graph(graph),
     )
 
