@@ -268,6 +268,16 @@ ACCOUNTS: List[Dict[str, Any]] = [
                 "trust_policy_services": [],
                 "trust_principals": [f"arn:aws:iam::{SANDBOX}:root"],
             },
+            {
+                # AWS Organizations creates this in every member account, and
+                # its trust policy names the management account by design.
+                # Present so the demo exercises the AWS-managed-role rule that
+                # stops it being reported as a CRITICAL finding.
+                "name": "OrganizationAccountAccessRole",
+                "attached_policies": ["AdministratorAccess"],
+                "trust_policy_services": [],
+                "trust_principals": ["arn:aws:iam::999999999999:root"],
+            },
         ],
         "policies": {
             "ReadOnlyAnalystPolicy": [

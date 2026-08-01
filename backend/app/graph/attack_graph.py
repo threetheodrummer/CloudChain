@@ -205,6 +205,11 @@ def _wire_cross_account_trust(g: nx.DiGraph, by_issue: Dict[str, List[Finding]])
     from app.scanners.iam_scanner import _account_from_arn, _principal_name_from_arn
 
     for f in by_issue.get("IAM_CROSS_ACCOUNT_TRUST", []):
+        # AWS-created roles trust the management account by design. Drawing an
+        # attack edge there would model "AWS Organizations works as documented"
+        # as a breach route, which is noise, not signal.
+        if f.evidence.get("aws_managed"):
+            continue
         role_node = node_id("iam_role", f.resource_id, f.account_id)
         for arn in f.evidence.get("trusted_principals", []):
             src_account = _account_from_arn(arn)

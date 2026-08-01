@@ -9,6 +9,7 @@ risk scoring) is unaffected.
 """
 from __future__ import annotations
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,31 @@ def _as_list(value: Any) -> List[Any]:
     if value is None:
         return []
     return value if isinstance(value, list) else [value]
+
+
+def _flatten_policy_document(document: Any) -> List[Tuple[str, str]]:
+    """An IAM policy document -> flat (action, resource) Allow pairs.
+
+    Handles both the dict form boto3 returns for inline policies and the JSON
+    string form that sometimes appears, plus AWS's habit of using a bare string
+    where a single-element list is meant.
+    """
+    if isinstance(document, str):
+        try:
+            document = json.loads(document)
+        except (ValueError, TypeError):
+            return []
+    if not isinstance(document, dict):
+        return []
+
+    pairs: List[Tuple[str, str]] = []
+    for stmt in _as_list(document.get("Statement")):
+        if not isinstance(stmt, dict) or stmt.get("Effect") != "Allow":
+            continue
+        for action in _as_list(stmt.get("Action")):
+            for resource in _as_list(stmt.get("Resource")) or ["*"]:
+                pairs.append((action, resource))
+    return pairs
 
 
 class AWSDataSource(ABC):
@@ -46,6 +72,27 @@ class AWSDataSource(ABC):
 
     @abstractmethod
     def is_bucket_encrypted(self, bucket: str) -> bool: ...
+
+    def get_bucket_encryption(self, bucket: str) -> Dict[str, Any]:
+        """What kind of default encryption a bucket has, not merely whether.
+
+        AWS has applied SSE-S3 to every new bucket since January 2023, so
+        "is it encrypted?" is now nearly always yes and the check stops telling
+        you anything. The useful question is which key: an AWS-owned key
+        (AES256) gives you no control over rotation or access, while a
+        customer-managed KMS key does.
+
+        Returns {"enabled", "algorithm", "kms_key_id", "bucket_key_enabled"}.
+        Default derives from is_bucket_encrypted so sources that can't tell the
+        difference keep working.
+        """
+        enabled = self.is_bucket_encrypted(bucket)
+        return {
+            "enabled": enabled,
+            "algorithm": "AES256" if enabled else "",
+            "kms_key_id": None,
+            "bucket_key_enabled": False,
+        }
 
     @abstractmethod
     def is_bucket_versioned(self, bucket: str) -> bool: ...
@@ -93,6 +140,35 @@ class AWSDataSource(ABC):
         """Return a flattened list of (action, resource) pairs granted (Allow
         effect only) by the given policy name."""
         ...
+
+    def get_identity_policy_statements(
+        self, identity_type: str, name: str
+    ) -> List[Tuple[str, str]]:
+        """Every (action, resource) pair granted to a user or role.
+
+        This exists because resolving a policy *by name* is not sufficient on a
+        real account. An identity's permissions can come from three places:
+
+          - an attached AWS-managed policy  (resolvable by name)
+          - an attached customer-managed policy  (needs its full ARN)
+          - an inline policy  (has no ARN at all; it is read from the identity)
+
+        Only the first is answerable from a name, so a source that can do
+        better overrides this. Scanning a real THM lab surfaced exactly this
+        gap: users whose over-privilege lived in an inline policy came back
+        looking clean.
+
+        identity_type is "user" or "role".
+        """
+        names = (
+            self.list_user_policy_names(name)
+            if identity_type == "user"
+            else self.list_role_policy_names(name)
+        )
+        pairs: List[Tuple[str, str]] = []
+        for policy_name in names:
+            pairs.extend(self.get_policy_statements(policy_name))
+        return pairs
 
     @abstractmethod
     def get_account_password_policy(self) -> Dict[str, Any]: ...
@@ -325,11 +401,34 @@ class RealAWSDataSource(AWSDataSource):
         return self._safe(call, False)
 
     def is_bucket_encrypted(self, bucket: str) -> bool:
-        def call():
-            self._s3.get_bucket_encryption(Bucket=bucket)
-            return True
+        return bool(self.get_bucket_encryption(bucket)["enabled"])
 
-        return self._safe(call, False)
+    def get_bucket_encryption(self, bucket: str) -> Dict[str, Any]:
+        def call():
+            resp = self._s3.get_bucket_encryption(Bucket=bucket)
+            rules = resp["ServerSideEncryptionConfiguration"].get("Rules", [])
+            if not rules:
+                return {
+                    "enabled": False,
+                    "algorithm": "",
+                    "kms_key_id": None,
+                    "bucket_key_enabled": False,
+                }
+            rule = rules[0]
+            default = rule.get("ApplyServerSideEncryptionByDefault", {}) or {}
+            return {
+                "enabled": True,
+                "algorithm": default.get("SSEAlgorithm", ""),
+                "kms_key_id": default.get("KMSMasterKeyID"),
+                "bucket_key_enabled": bool(rule.get("BucketKeyEnabled")),
+            }
+
+        # ServerSideEncryptionConfigurationNotFoundError means genuinely
+        # unencrypted, which _safe collapses to the same default.
+        return self._safe(
+            call,
+            {"enabled": False, "algorithm": "", "kms_key_id": None, "bucket_key_enabled": False},
+        )
 
     def is_bucket_versioned(self, bucket: str) -> bool:
         def call():
@@ -442,6 +541,63 @@ class RealAWSDataSource(AWSDataSource):
                 aws = stmt.get("Principal", {}).get("AWS")
                 principals.extend(_as_list(aws))
             return principals
+
+        return self._safe(call, [])
+
+    def get_identity_policy_statements(
+        self, identity_type: str, name: str
+    ) -> List[Tuple[str, str]]:
+        """Resolve an identity's real permissions: attached *and* inline.
+
+        Attached policies are read from their ARN, which covers both AWS-managed
+        and customer-managed. Inline policies have no ARN and are fetched from
+        the identity itself. Resolving only by name -- as this used to -- misses
+        both customer-managed and inline, which is the majority of the
+        interesting permissions on a real account.
+        """
+        is_user = identity_type == "user"
+        pairs: List[Tuple[str, str]] = []
+
+        def attached():
+            if is_user:
+                resp = self._iam.list_attached_user_policies(UserName=name)
+            else:
+                resp = self._iam.list_attached_role_policies(RoleName=name)
+            return [p["PolicyArn"] for p in resp.get("AttachedPolicies", [])]
+
+        for arn in self._safe(attached, []):
+            pairs.extend(self._statements_from_policy_arn(arn))
+
+        def inline_names():
+            if is_user:
+                return self._iam.list_user_policies(UserName=name).get("PolicyNames", [])
+            return self._iam.list_role_policies(RoleName=name).get("PolicyNames", [])
+
+        for policy_name in self._safe(inline_names, []):
+
+            def document(policy_name=policy_name):
+                if is_user:
+                    resp = self._iam.get_user_policy(UserName=name, PolicyName=policy_name)
+                else:
+                    resp = self._iam.get_role_policy(RoleName=name, PolicyName=policy_name)
+                return resp["PolicyDocument"]
+
+            doc = self._safe(document, None)
+            if doc:
+                pairs.extend(_flatten_policy_document(doc))
+
+        return pairs
+
+    def _statements_from_policy_arn(self, arn: str) -> List[Tuple[str, str]]:
+        """Read a managed policy's default version. Works for both AWS-managed
+        (arn:aws:iam::aws:policy/...) and customer-managed ARNs."""
+
+        def call():
+            policy = self._iam.get_policy(PolicyArn=arn)["Policy"]
+            version = self._iam.get_policy_version(
+                PolicyArn=arn, VersionId=policy["DefaultVersionId"]
+            )
+            return _flatten_policy_document(version["PolicyVersion"]["Document"])
 
         return self._safe(call, [])
 

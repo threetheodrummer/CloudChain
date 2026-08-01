@@ -72,6 +72,7 @@ CAUSING_EVENTS: Dict[str, tuple] = {
         "PutObject",
     ),
     "S3_NO_ENCRYPTION": ("DeleteBucketEncryption", "PutBucketEncryption"),
+    "S3_AWS_OWNED_ENCRYPTION_KEY": ("PutBucketEncryption", "CreateBucket"),
     "S3_NO_VERSIONING": ("PutBucketVersioning",),
     "IAM_OVERPERMISSIVE_POLICY": (
         "AttachUserPolicy",

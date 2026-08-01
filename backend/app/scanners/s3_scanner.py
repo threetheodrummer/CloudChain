@@ -41,6 +41,10 @@ class S3Scanner:
             acl_public = self.source.is_bucket_acl_public(bucket)
             policy_public = self.source.is_bucket_policy_public(bucket)
             is_public = (not fully_blocked) and (acl_public or policy_public)
+            # Set when a public bucket turns out to hold credential-shaped keys.
+            # Declared here so the encryption check below can read it whether or
+            # not the object scan ran.
+            sensitive_hit = False
 
             if is_public:
                 findings.append(
@@ -69,6 +73,7 @@ class S3Scanner:
 
                 object_keys = self.source.list_object_keys(bucket)
                 matched = [k for k in object_keys if _matches_sensitive_pattern(k)]
+                sensitive_hit = bool(matched)
                 if matched:
                     leaked_for = self.source.leaked_credentials_hint(bucket)
                     findings.append(
@@ -92,7 +97,8 @@ class S3Scanner:
                         )
                     )
 
-            if not self.source.is_bucket_encrypted(bucket):
+            encryption = self.source.get_bucket_encryption(bucket)
+            if not encryption.get("enabled"):
                 findings.append(
                     Finding(
                         resource_id=bucket,
@@ -103,6 +109,39 @@ class S3Scanner:
                         base_severity=Severity.MEDIUM,
                         internet_facing=is_public,
                         remediation="Enable default server-side encryption (SSE-S3 or SSE-KMS).",
+                        evidence={"encryption": encryption},
+                    )
+                )
+            elif encryption.get("algorithm") == "AES256" and (is_public or sensitive_hit):
+                # AWS has applied SSE-S3 to every new bucket since January 2023,
+                # so "encrypted: yes" says almost nothing on a modern account --
+                # which is why the old boolean check missed a room built around
+                # exactly this. Raised only where it matters: a bucket that is
+                # public or holds credential-shaped objects is protected by a key
+                # the account owner cannot rotate, audit or revoke.
+                findings.append(
+                    Finding(
+                        resource_id=bucket,
+                        resource_type=self.resource_type,
+                        issue_code="S3_AWS_OWNED_ENCRYPTION_KEY",
+                        title=(
+                            f"S3 bucket '{bucket}' is encrypted with an AWS-owned key "
+                            f"despite holding exposed or sensitive data"
+                        ),
+                        description=(
+                            "Default encryption uses SSE-S3 (AES256), which AWS applies to "
+                            "all new buckets automatically. The key is owned by AWS: it "
+                            "cannot be rotated on your schedule, access to it cannot be "
+                            "audited via CloudTrail, and it cannot be revoked to render "
+                            "objects unreadable after a leak."
+                        ),
+                        base_severity=Severity.LOW,
+                        internet_facing=is_public,
+                        remediation=(
+                            "Switch this bucket to SSE-KMS with a customer-managed key, and "
+                            "enable an S3 Bucket Key to keep request costs down."
+                        ),
+                        evidence={"encryption": encryption},
                     )
                 )
 

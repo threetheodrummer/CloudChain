@@ -68,6 +68,30 @@ def _collect_statements(source: AWSDataSource, policy_names: List[str]) -> List[
     return pairs
 
 
+# Roles AWS creates and manages itself. Their trust policies name the
+# organisation's management account or an AWS service *by design* -- that is
+# their entire function.
+#
+# Reporting them as CRITICAL cross-account trust is technically true and
+# practically useless: scanning six real THM org accounts produced these at the
+# top of four reports, burying the findings that actually mattered. They are
+# still reported, because a compromised management account is a real (if
+# out-of-scope) risk, but at a severity that reflects "expected AWS plumbing".
+AWS_MANAGED_ROLE_PREFIXES = (
+    "OrganizationAccountAccessRole",
+    "stacksets-exec-",
+    "AWSServiceRoleFor",
+    "AWSControlTower",
+    "AWSReservedSSO_",
+    "aws-controltower-",
+)
+
+
+def is_aws_managed_role(role: str) -> bool:
+    """True for roles AWS or its services create, rather than the account owner."""
+    return any(role.startswith(prefix) for prefix in AWS_MANAGED_ROLE_PREFIXES)
+
+
 class IAMScanner:
     def __init__(self, source: AWSDataSource):
         self.source = source
@@ -122,7 +146,9 @@ class IAMScanner:
                     )
 
             policy_names = self.source.list_user_policy_names(user)
-            statements = _collect_statements(self.source, policy_names)
+            # Resolved through the identity rather than by policy name, so
+            # customer-managed and inline policies are actually read.
+            statements = self.source.get_identity_policy_statements("user", user)
             actions: Set[str] = {a for a, _ in statements}
 
             if ("*", "*") in statements:
@@ -176,18 +202,37 @@ class IAMScanner:
         findings: List[Finding] = []
         for role in self.source.list_iam_roles():
             policy_names = self.source.list_role_policy_names(role)
-            statements = _collect_statements(self.source, policy_names)
+            statements = self.source.get_identity_policy_statements("role", role)
+            aws_managed = is_aws_managed_role(role)
+
             if ("*", "*") in statements:
                 findings.append(
                     Finding(
                         resource_id=role,
                         resource_type="iam_role",
                         issue_code="IAM_ROLE_ADMIN_ACCESS",
-                        title=f"IAM role '{role}' has administrator-level access",
-                        description=f"Attached polic{'y' if len(policy_names)==1 else 'ies'} {policy_names} grant unrestricted access.",
-                        base_severity=Severity.HIGH,
-                        remediation="Scope this role to only the permissions its workload requires.",
-                        evidence={"policies": policy_names},
+                        title=(
+                            f"AWS-managed role '{role}' has administrator-level access "
+                            f"(expected)"
+                            if aws_managed
+                            else f"IAM role '{role}' has administrator-level access"
+                        ),
+                        description=(
+                            f"'{role}' is created and managed by AWS, and administrator "
+                            f"access is inherent to its purpose. Reported for visibility, "
+                            f"not as a misconfiguration."
+                            if aws_managed
+                            else f"Attached polic{'y' if len(policy_names)==1 else 'ies'} "
+                            f"{policy_names} grant unrestricted access."
+                        ),
+                        base_severity=Severity.LOW if aws_managed else Severity.HIGH,
+                        remediation=(
+                            "No action required unless this role should not exist. Verify "
+                            "the account it trusts is your own organisation management account."
+                            if aws_managed
+                            else "Scope this role to only the permissions its workload requires."
+                        ),
+                        evidence={"policies": policy_names, "aws_managed": aws_managed},
                     )
                 )
 
@@ -222,6 +267,40 @@ class IAMScanner:
             return []
 
         is_admin = ("*", "*") in statements
+        aws_managed = is_aws_managed_role(role)
+
+        if aws_managed:
+            # AWS created this role and its trust policy names the organisation
+            # management account on purpose. Still worth surfacing -- the
+            # trusted account should be one you recognise -- but calling it
+            # CRITICAL drowns the findings that are actually actionable.
+            return [
+                Finding(
+                    resource_id=role,
+                    resource_type="iam_role",
+                    issue_code="IAM_CROSS_ACCOUNT_TRUST",
+                    title=f"AWS-managed role '{role}' is assumable from account(s) {', '.join(external)}",
+                    description=(
+                        f"'{role}' is created by AWS (Organizations, StackSets or a "
+                        f"service-linked role) and trusting an external account is inherent "
+                        f"to how it works. Listed so the trusted account can be verified, "
+                        f"not because the configuration is wrong."
+                    ),
+                    base_severity=Severity.LOW,
+                    remediation=(
+                        f"Confirm that {', '.join(external)} is your own organisation "
+                        f"management account. If it isn't, treat this as urgent."
+                    ),
+                    evidence={
+                        "trusted_principals": principals,
+                        "external_accounts": external,
+                        "grants_admin": is_admin,
+                        "policies": policy_names,
+                        "aws_managed": True,
+                    },
+                )
+            ]
+
         return [
             Finding(
                 resource_id=role,
@@ -253,6 +332,7 @@ class IAMScanner:
                     "external_accounts": external,
                     "grants_admin": is_admin,
                     "policies": policy_names,
+                    "aws_managed": False,
                 },
             )
         ]

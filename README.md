@@ -164,7 +164,7 @@ CloudChain/
       report/generator.py # assembles the final JSON report
       report/pdf.py       # renders that same report as a downloadable PDF
     Dockerfile
-    tests/                # 134 tests; fixtures/ holds sample Terraform plans
+    tests/                # 157 tests; fixtures/ holds sample Terraform plans
   frontend/
     src/
       components/
@@ -444,7 +444,7 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-134 tests covering scanner logic, attack-path graph construction, cross-account
+157 tests covering scanner logic, attack-path graph construction, cross-account
 correlation, risk scoring, the posture engine's explainability contract,
 path validation and its safety guarantees, CloudTrail attribution, Terraform
 plan parity, escalation-route discovery, PDF export, drift detection, and the
@@ -486,15 +486,10 @@ Worth being able to state plainly — most of these are deliberate.
   VPC flow logs, EBS snapshots and instance metadata are all out of scope —
   confirmed by pointing CloudChain at rooms built around each of them and
   correctly getting nothing back.
-- **AWS service-managed roles are over-reported.** `OrganizationAccountAccessRole`
-  and CloudFormation StackSets execution roles trust the organisation's
-  management account *by design*, and CloudChain currently flags that as a
-  CRITICAL cross-account trust. On a real org account these dominate the report
-  and bury the genuine findings. Recognising AWS-created roles is the next fix.
-- **Policies are resolved by name, AWS-managed only.** `get_policy_statements`
-  can't read customer-managed or inline policy documents, so an identity whose
-  over-privilege lives in one of those looks clean. This was confirmed against
-  a real account, not just noted in theory.
+- **Key age can't be tested in an ephemeral lab.** `IAM_STALE_ACCESS_KEY` needs
+  a key older than 90 days. Training environments are provisioned minutes before
+  you scan them, so the check correctly finds nothing there — a limitation of
+  the test harness, not the scanner.
 - **Attribution reaches back 90 days.** `LookupEvents` reads CloudTrail's event
   history, not a trail's S3 archive. Going further would mean querying the
   archive with Athena, which is a different (and much slower) shape of
