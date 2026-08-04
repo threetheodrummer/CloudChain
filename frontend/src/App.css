@@ -10,7 +10,7 @@
 .app-shell--error {
   position: relative;
   z-index: 2;
-  max-width: 620px;
+  max-width: var(--form-width);
   margin: 0 auto;
   padding: 170px 24px 96px;
   text-align: center;

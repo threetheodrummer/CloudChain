@@ -1,9 +1,9 @@
 .history {
   position: relative;
   z-index: 2;
-  max-width: 1000px;
+  max-width: var(--shell-width);
   margin: 0 auto;
-  padding: 150px 24px 72px;
+  padding: 150px var(--shell-pad-x) 72px;
 }
 
 .history__header h1 {

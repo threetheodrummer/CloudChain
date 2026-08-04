@@ -1,9 +1,9 @@
 .about {
   position: relative;
   z-index: 2;
-  max-width: 720px;
+  max-width: var(--prose-width);
   margin: 0 auto;
-  padding: 140px 24px 72px;
+  padding: 140px var(--shell-pad-x) 72px;
 }
 
 .about__back {

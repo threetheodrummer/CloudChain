@@ -1,3 +1,22 @@
+:root {
+  /* Layout widths live here rather than as pixel values scattered across nine
+     stylesheets, which is how they drifted out of step in the first place. */
+
+  /* Content views fill the viewport, keeping a gutter so nothing touches the
+     edge. The upper bound stops the layout stretching absurdly on ultrawides. */
+  --shell-width: min(1680px, 94vw);
+  --shell-pad-x: clamp(20px, 3.5vw, 56px);
+
+  /* Prose stays narrower on purpose. Line lengths past roughly 90 characters
+     measurably hurt readability, so a full-width paragraph is a regression
+     even when the screen allows it. */
+  --prose-width: min(1080px, 92vw);
+
+  /* Forms and the single-column progress view. A credential form stretched
+     across 1600px looks broken rather than spacious. */
+  --form-width: min(860px, 92vw);
+}
+
 * {
   box-sizing: border-box;
 }

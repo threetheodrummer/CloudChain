@@ -1,9 +1,9 @@
 .landing {
   position: relative;
   z-index: 2;
-  max-width: 940px;
+  max-width: var(--shell-width);
   margin: 0 auto;
-  padding: 160px 24px 80px;
+  padding: 160px var(--shell-pad-x) 80px;
 }
 
 .landing__hero {

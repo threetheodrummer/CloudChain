@@ -1,9 +1,9 @@
 .aws-connect {
   position: relative;
   z-index: 2;
-  max-width: 620px;
+  max-width: var(--form-width);
   margin: 0 auto;
-  padding: 140px 24px 64px;
+  padding: 140px var(--shell-pad-x) 64px;
 }
 
 .aws-connect__back {

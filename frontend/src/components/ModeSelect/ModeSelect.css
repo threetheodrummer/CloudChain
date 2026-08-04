@@ -1,9 +1,9 @@
 .mode-select {
   position: relative;
   z-index: 2;
-  max-width: 980px;
+  max-width: var(--shell-width);
   margin: 0 auto;
-  padding: 150px 24px 64px;
+  padding: 150px var(--shell-pad-x) 64px;
 }
 
 .mode-select__intro {
