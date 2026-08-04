@@ -103,7 +103,7 @@ def _dark_page(canvas, doc) -> None:
 
     canvas.setFillColor(FAINT)
     canvas.setFont("Helvetica", 7.5)
-    canvas.drawString(18 * mm, 10 * mm, "CloudChain posture report")
+    canvas.drawString(18 * mm, 10 * mm, "CloudChain Posture Report")
     canvas.drawRightString(doc.pagesize[0] - 18 * mm, 10 * mm, f"page {canvas.getPageNumber()}")
     canvas.restoreState()
 
@@ -299,7 +299,7 @@ def build_report_pdf(report: Dict[str, Any]) -> bytes:
     components = posture.get("components") or []
     story: List[Any] = []
 
-    story.append(Paragraph("CloudChain posture report", S["title"]))
+    story.append(Paragraph("CloudChain Posture Report", S["title"]))
     story.append(
         Paragraph(
             _safe(

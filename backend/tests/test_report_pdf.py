@@ -35,7 +35,7 @@ def test_output_is_a_real_pdf(report):
 
 def test_every_major_section_reaches_the_document(pdf_text):
     for section in (
-        "CloudChain posture report",
+        "CloudChain Posture Report",
         "How the score was calculated",
         "Findings by severity",
         "Attack paths",
