@@ -125,6 +125,17 @@ class AWSDataSource(ABC):
     @abstractmethod
     def list_role_policy_names(self, role: str) -> List[str]: ...
 
+    def get_role_path(self, role: str) -> str:
+        """The role's IAM path, e.g. '/' or '/aws-service-role/'.
+
+        Path matters because AWS *enforces* it: IAM refuses to create a role
+        under /aws-service-role/, so that path is proof AWS created the role.
+        A role's name, by contrast, is chosen by whoever made it -- which makes
+        name-based trust decisions spoofable by an attacker who can create a
+        role and call it whatever gets ignored.
+        """
+        return "/"
+
     def list_role_trust_principals(self, role: str) -> List[str]:
         """Principal ARNs allowed to assume this role by its trust policy.
 
@@ -261,6 +272,12 @@ class DemoAWSDataSource(AWSDataSource):
     def list_role_trust_principals(self, role: str) -> List[str]:
         return list(self._roles[role].get("trust_principals", []))
 
+    def get_role_path(self, role: str) -> str:
+        # Tolerant of a role the seeded data doesn't define: a missing path is
+        # "/" (an ordinary customer role), which is the conservative answer --
+        # it earns no downgrade.
+        return self._roles.get(role, {}).get("path", "/")
+
     def get_policy_statements(self, policy_name: str) -> List[Tuple[str, str]]:
         return list(self._policies.get(policy_name, []))
 
@@ -334,6 +351,7 @@ class RealAWSDataSource(AWSDataSource):
         self._iam = session.client("iam")
         self._ec2 = session.client("ec2")
         self._cloudtrail = session.client("cloudtrail")
+        self._role_paths: Dict[str, str] = {}
 
         # Resolve the account id once so findings can be attributed. A failure
         # here is non-fatal: the scan still runs, findings are just unattributed.
@@ -507,10 +525,26 @@ class RealAWSDataSource(AWSDataSource):
             roles = []
             paginator = self._iam.get_paginator("list_roles")
             for page in paginator.paginate():
-                roles.extend(r["RoleName"] for r in page["Roles"])
+                for r in page["Roles"]:
+                    roles.append(r["RoleName"])
+                    # Cached here rather than fetched per-role later: list_roles
+                    # already returns Path, and a second API call per role would
+                    # be wasteful on an account with hundreds of them.
+                    self._role_paths[r["RoleName"]] = r.get("Path", "/")
             return roles
 
         return self._safe(call, [])
+
+    def get_role_path(self, role: str) -> str:
+        if role in self._role_paths:
+            return self._role_paths[role]
+
+        def call():
+            return self._iam.get_role(RoleName=role)["Role"].get("Path", "/")
+
+        path = self._safe(call, "/")
+        self._role_paths[role] = path
+        return path
 
     def list_role_policy_names(self, role: str) -> List[str]:
         def call():

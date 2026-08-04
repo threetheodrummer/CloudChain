@@ -165,7 +165,7 @@ CloudChain/
       report/generator.py # assembles the final JSON report
       report/pdf.py       # renders that same report as a downloadable PDF
     Dockerfile
-    tests/                # 181 tests; fixtures/ holds sample Terraform plans
+    tests/                # 194 tests; fixtures/ holds sample Terraform plans
   frontend/
     src/
       components/
@@ -339,6 +339,35 @@ Validating or attributing a **real**-mode scan requires supplying credentials
 again in the request body, because scan-time credentials are deliberately never
 persisted.
 
+## Suppressing known-benign roles
+
+Every account has infrastructure that legitimately holds broad permissions —
+CI runners, provisioning roles, lab harnesses. CloudChain will report them,
+correctly, and drown the findings you can act on.
+
+```bash
+CLOUDCHAIN_BENIGN_ROLES="LabOrchestratorRole,ci-*,*-provisioner"
+```
+
+Matched roles are **downgraded to LOW and annotated**, never dropped. The
+report states which rule fired and adds *"the finding is real; someone decided
+it was acceptable."* A suppression you can't see in the output is
+indistinguishable from a bug.
+
+Role provenance is reported at three confidence levels, because they are not
+equally trustworthy:
+
+| Level | Basis | Forgeable? |
+|---|---|---|
+| `aws_service_linked` | path `/aws-service-role/` | No — IAM refuses to create roles there |
+| `aws_named` | matches an AWS naming convention | **Yes** — names are chosen by whoever creates the role |
+| `operator_allowlisted` | your config | Yes — it's a human judgement, by design |
+
+That middle row is the one worth understanding. A role called
+`AWSServiceRoleForEvil` at an ordinary path gets downgraded on the strength of
+its name alone, and the report says so in as many words. Path-based
+verification is the only part of this that constitutes proof.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every push and pull request:
@@ -445,7 +474,7 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-181 tests covering scanner logic, attack-path graph construction, cross-account
+194 tests covering scanner logic, attack-path graph construction, cross-account
 correlation, risk scoring, the posture engine's explainability contract,
 path validation and its safety guarantees, CloudTrail attribution, Terraform
 plan parity, escalation-route discovery, PDF export, drift detection, and the

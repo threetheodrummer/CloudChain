@@ -13,6 +13,7 @@ the way to admin access.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from fnmatch import fnmatch
 from typing import List, Set, Tuple
 
 from app.config import settings
@@ -87,10 +88,79 @@ AWS_MANAGED_ROLE_PREFIXES = (
     "aws-controltower-",
 )
 
+# IAM refuses to create a role under this path -- only AWS can put one there.
+# That makes it *proof* of provenance, unlike a name, which is chosen by
+# whoever created the role.
+AWS_SERVICE_ROLE_PATH = "/aws-service-role/"
 
-def is_aws_managed_role(role: str) -> bool:
-    """True for roles AWS or its services create, rather than the account owner."""
-    return any(role.startswith(prefix) for prefix in AWS_MANAGED_ROLE_PREFIXES)
+# How confident CloudChain is that a role is what it appears to be.
+VERIFIED_AWS = "aws_service_linked"  # AWS-enforced path; cannot be forged
+NAMED_AWS = "aws_named"  # name matches an AWS convention; spoofable
+ALLOWLISTED = "operator_allowlisted"  # a human declared this benign
+NORMAL = "normal"
+
+
+def classify_role(role: str, path: str = "/") -> str:
+    """How much benefit of the doubt this role has earned.
+
+    The distinction between VERIFIED_AWS and NAMED_AWS matters. A role at
+    /aws-service-role/ was demonstrably created by AWS. A role merely *called*
+    AWSServiceRoleForSomething was called that by someone -- possibly an
+    attacker who noticed which names scanners ignore. Both are downgraded, but
+    only one is trustworthy, and the report says which.
+    """
+    if path.startswith(AWS_SERVICE_ROLE_PATH):
+        return VERIFIED_AWS
+    if any(role.startswith(prefix) for prefix in AWS_MANAGED_ROLE_PREFIXES):
+        return NAMED_AWS
+    if matched_allowlist_rule(role):
+        return ALLOWLISTED
+    return NORMAL
+
+
+def matched_allowlist_rule(role: str) -> str:
+    """The operator-configured pattern this role matches, if any."""
+    for pattern in settings.benign_role_patterns:
+        if fnmatch(role, pattern):
+            return pattern
+    return ""
+
+
+def _downgrade_note(role: str, classification: str) -> str:
+    """Say plainly why a finding was downgraded, and how much to trust that."""
+    if classification == VERIFIED_AWS:
+        return (
+            f"'{role}' sits under {AWS_SERVICE_ROLE_PATH}, a path IAM only lets AWS "
+            f"create, so it is verifiably an AWS service-linked role. Its permissions "
+            f"are inherent to its purpose. Reported for visibility, not as a "
+            f"misconfiguration."
+        )
+    if classification == NAMED_AWS:
+        return (
+            f"'{role}' matches the naming convention AWS uses for Organizations, "
+            f"StackSets and Control Tower roles, so its permissions are probably "
+            f"expected. Note this is a judgement based on the role's *name*, which "
+            f"whoever created the role chose -- unlike a service-linked path, it is "
+            f"not proof. Confirm the role is one you recognise."
+        )
+    if classification == ALLOWLISTED:
+        rule = matched_allowlist_rule(role)
+        return (
+            f"'{role}' was downgraded because it matches the operator-configured "
+            f"allowlist rule '{rule}' (CLOUDCHAIN_BENIGN_ROLES). The finding is real; "
+            f"someone decided it was acceptable. Remove the rule to see it at full "
+            f"severity."
+        )
+    return ""
+
+
+def is_aws_managed_role(role: str, path: str = "/") -> bool:
+    """True for roles AWS creates, or ones the operator declared benign.
+
+    Kept as the single predicate the rest of the scanner asks, with
+    classify_role carrying the nuance about *why*.
+    """
+    return classify_role(role, path) != NORMAL
 
 
 class IAMScanner:
@@ -263,7 +333,9 @@ class IAMScanner:
         for role in self.source.list_iam_roles():
             policy_names = self.source.list_role_policy_names(role)
             statements = self.source.get_identity_policy_statements("role", role)
-            aws_managed = is_aws_managed_role(role)
+            path = self.source.get_role_path(role)
+            classification = classify_role(role, path)
+            aws_managed = classification != NORMAL
 
             if not aws_managed:
                 findings.extend(
@@ -283,9 +355,7 @@ class IAMScanner:
                             else f"IAM role '{role}' has administrator-level access"
                         ),
                         description=(
-                            f"'{role}' is created and managed by AWS, and administrator "
-                            f"access is inherent to its purpose. Reported for visibility, "
-                            f"not as a misconfiguration."
+                            _downgrade_note(role, classification)
                             if aws_managed
                             else f"Attached polic{'y' if len(policy_names)==1 else 'ies'} "
                             f"{policy_names} grant unrestricted access."
@@ -297,7 +367,13 @@ class IAMScanner:
                             if aws_managed
                             else "Scope this role to only the permissions its workload requires."
                         ),
-                        evidence={"policies": policy_names, "aws_managed": aws_managed},
+                        evidence={
+                            "policies": policy_names,
+                            "aws_managed": aws_managed,
+                            "role_classification": classification,
+                            "role_path": path,
+                            "allowlist_rule": matched_allowlist_rule(role),
+                        },
                     )
                 )
 
@@ -332,34 +408,36 @@ class IAMScanner:
             return []
 
         is_admin = policy.is_admin_equivalent(statements)
-        aws_managed = is_aws_managed_role(role)
+        path = self.source.get_role_path(role)
+        classification = classify_role(role, path)
+        aws_managed = classification != NORMAL
 
         if aws_managed:
-            # AWS created this role and its trust policy names the organisation
-            # management account on purpose. Still worth surfacing -- the
-            # trusted account should be one you recognise -- but calling it
-            # CRITICAL drowns the findings that are actually actionable.
+            # Expected infrastructure, or something a human declared benign.
+            # Still surfaced -- the trusted account should be one you recognise
+            # -- but calling it CRITICAL drowns the actionable findings.
             return [
                 Finding(
                     resource_id=role,
                     resource_type="iam_role",
                     issue_code="IAM_CROSS_ACCOUNT_TRUST",
-                    title=f"AWS-managed role '{role}' is assumable from account(s) {', '.join(external)}",
-                    description=(
-                        f"'{role}' is created by AWS (Organizations, StackSets or a "
-                        f"service-linked role) and trusting an external account is inherent "
-                        f"to how it works. Listed so the trusted account can be verified, "
-                        f"not because the configuration is wrong."
+                    title=(
+                        f"{'Allowlisted' if classification == ALLOWLISTED else 'AWS-managed'} "
+                        f"role '{role}' is assumable from account(s) {', '.join(external)}"
                     ),
+                    description=_downgrade_note(role, classification),
                     base_severity=Severity.LOW,
                     remediation=(
-                        f"Confirm that {', '.join(external)} is your own organisation "
-                        f"management account. If it isn't, treat this as urgent."
+                        f"Confirm that {', '.join(external)} is an account you recognise. "
+                        f"If it isn't, treat this as urgent."
                     ),
                     evidence={
                         "trusted_principals": principals,
                         "external_accounts": external,
                         "grants_admin": is_admin,
+                        "role_classification": classification,
+                        "role_path": path,
+                        "allowlist_rule": matched_allowlist_rule(role),
                         "policies": policy_names,
                         "aws_managed": True,
                     },

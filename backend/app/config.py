@@ -34,5 +34,19 @@ class Settings:
     # Ports CloudChain treats as sensitive when exposed to 0.0.0.0/0.
     sensitive_ports: tuple = (22, 23, 21, 3389, 3306, 5432, 1433, 27017, 6379, 9200)
 
+    # Roles the operator has declared benign -- CI runners, provisioning roles,
+    # lab harnesses. Comma-separated glob patterns, e.g.
+    #     CLOUDCHAIN_BENIGN_ROLES="LabOrchestratorRole,ci-*,*-provisioner"
+    #
+    # These are DOWNGRADED AND ANNOTATED, never dropped. A suppression you
+    # cannot see in the output is indistinguishable from a bug, and name-based
+    # matching is spoofable by anyone who can choose a role name -- so the
+    # report always states which rule fired and on what.
+    benign_role_patterns: tuple = tuple(
+        p.strip()
+        for p in os.environ.get("CLOUDCHAIN_BENIGN_ROLES", "").split(",")
+        if p.strip()
+    )
+
 
 settings = Settings()
