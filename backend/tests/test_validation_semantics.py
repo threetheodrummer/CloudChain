@@ -252,3 +252,56 @@ def test_validation_never_reads_objects_even_with_new_methods(demo_scan):
     assert calls == []
     assert "read_object_head" not in READ_ONLY_METHODS
     assert "access_key_account" not in READ_ONLY_METHODS
+
+
+# ------------------------------------------------ empty policies, settled by AWS
+# Found during the real-account stale-path experiment: removing a user's only
+# policy left validation unable to tell "no policies" from "couldn't read them".
+
+
+def _no_policy_source(decision):
+    class NoPolicies(_Simulated):
+        def get_identity_policy_statements(self, identity_type, name):
+            return []
+
+        def simulate_principal_policy(self, principal_arn, actions, resource_arns=None):
+            return {a: {"decision": decision, "allowed_by_boundary": None,
+                        "allowed_by_organizations": None, "missing_context": []} for a in actions}
+
+    return NoPolicies(account_id=PROD)
+
+
+def test_removed_policy_is_refuted_when_simulator_confirms_denial():
+    path, graph = _self_escalation_path()
+    v = validate_path(path, _no_policy_source("implicitDeny"), graph)
+    assert v.status is VerdictStatus.REFUTED
+    assert "simulator confirms" in v.hops[0].reason
+
+
+def test_grant_from_elsewhere_is_confirmed_by_simulator():
+    path, graph = _self_escalation_path()
+    v = validate_path(path, _no_policy_source("allowed"), graph)
+    assert v.status is VerdictStatus.CONFIRMED
+    assert "group" in v.hops[0].reason
+
+
+def test_group_grant_overrides_static_refutation():
+    path, graph = _self_escalation_path()
+
+    class GroupGranted(_Simulated):
+        def get_identity_policy_statements(self, identity_type, name):
+            return [("s3:GetObject", "*")]  # own policy: nothing dangerous
+
+    v = validate_path(path, GroupGranted(account_id=PROD), graph)
+    assert v.status is VerdictStatus.CONFIRMED
+
+
+def test_empty_policies_without_simulator_stay_unverifiable():
+    path, graph = _self_escalation_path()
+
+    class Blind(DemoAWSDataSource):
+        def get_identity_policy_statements(self, identity_type, name):
+            return []
+
+    v = validate_path(path, Blind(account_id=PROD), graph)
+    assert v.status is VerdictStatus.UNVERIFIABLE

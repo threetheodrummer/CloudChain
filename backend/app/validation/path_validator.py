@@ -235,6 +235,72 @@ def _apply_simulation(
     return status, reason, calls
 
 
+def _ask_simulator_when_blind(
+    source: AWSDataSource,
+    kind: str,
+    name: str,
+    actions: Sequence[str],
+    calls: List[EvidenceCall],
+    resource_arns: Optional[Sequence[str]] = None,
+    need: str = "any",
+) -> Optional[Tuple[VerdictStatus, str, List[EvidenceCall]]]:
+    """Settle a hop the static reader can't, by asking AWS directly.
+
+    An identity whose policies come back empty is ambiguous: it may have none
+    (the permission was removed, so the hop is REFUTED), the read may have been
+    denied, or the grant may come from somewhere the static reader doesn't look,
+    such as an IAM group. Only the policy simulator can tell these apart.
+
+    Returns a verdict, or None when the simulator isn't available, in which
+    case the caller keeps its UNVERIFIABLE answer.
+    """
+    arn = source.principal_arn(_identity_type(kind), name)
+    if not arn:
+        return None
+    resources = list(resource_arns or ["*"])
+    results = source.simulate_principal_policy(arn, actions, resources)
+    if results is None:
+        return None
+
+    allowed = [a for a in actions if results.get(a, {}).get("decision") == "allowed"]
+    undecidable = [
+        a for a in actions if a not in allowed and results.get(a, {}).get("missing_context")
+    ]
+    evidence = EvidenceCall(
+        api="iam:SimulatePrincipalPolicy",
+        request=f"PolicySourceArn={arn}, ResourceArns={', '.join(resources)}",
+        observed="; ".join(f"{a}: {results.get(a, {}).get('decision', 'unknown')}" for a in actions),
+        cli=(
+            f"aws iam simulate-principal-policy --policy-source-arn {arn} "
+            f"--action-names {' '.join(actions)} --resource-arns {' '.join(resources)}"
+        ),
+    )
+    calls = calls + [evidence]
+
+    satisfied = (len(allowed) == len(actions)) if need == "all" else bool(allowed)
+    if satisfied:
+        return (
+            VerdictStatus.CONFIRMED,
+            f"No grant was visible in '{name}''s own policies, but AWS's policy simulator "
+            f"allows {', '.join(allowed)}, so the permission comes from somewhere else "
+            f"(for example an IAM group). The hop still holds.",
+            calls,
+        )
+    if undecidable:
+        return (
+            VerdictStatus.UNVERIFIABLE,
+            f"AWS's policy simulator could not decide {', '.join(undecidable)} for '{name}' "
+            f"without request context.",
+            calls,
+        )
+    return (
+        VerdictStatus.REFUTED,
+        f"'{name}' no longer has any policy granting {', '.join(actions) if len(actions) <= 3 else 'the required actions'}; "
+        f"AWS's policy simulator confirms they are denied. The hop cannot be walked.",
+        calls,
+    )
+
+
 # --------------------------------------------------------------------------
 # Hop verifiers -- one per relation the graph engine can emit
 # --------------------------------------------------------------------------
@@ -380,6 +446,18 @@ def _verify_pass_role(
     )
 
     if not statements:
+        role_arn = source.principal_arn("role", role)
+        settled = _ask_simulator_when_blind(
+            source, kind, name, ["iam:PassRole"], calls, [role_arn] if role_arn else None
+        )
+        if settled is not None and settled[0] is VerdictStatus.CONFIRMED:
+            compute_check = _ask_simulator_when_blind(
+                source, kind, name, sorted(COMPUTE_CREATE_ACTIONS), settled[2]
+            )
+            if compute_check is not None:
+                return compute_check
+        if settled is not None:
+            return settled
         return (
             VerdictStatus.UNVERIFIABLE,
             f"Could not resolve the policy documents attached to '{name}', so the "
@@ -463,6 +541,11 @@ def _verify_self_escalation(
         )
     )
     if not statements:
+        settled = _ask_simulator_when_blind(
+            source, kind, name, sorted(policy.ESCALATION_PRIMITIVES), calls
+        )
+        if settled is not None:
+            return settled
         return (
             VerdictStatus.UNVERIFIABLE,
             f"Could not resolve the policy documents attached to '{name}'.",
@@ -482,11 +565,17 @@ def _verify_self_escalation(
         )
     )
     if not primitives:
+        # The identity's own policies no longer grant it, but a group might.
+        settled = _ask_simulator_when_blind(
+            source, kind, name, sorted(policy.ESCALATION_PRIMITIVES), calls
+        )
+        if settled is not None and settled[0] is VerdictStatus.CONFIRMED:
+            return settled
         return (
             VerdictStatus.REFUTED,
             f"'{name}' no longer holds any IAM write permission that would let it grant "
             f"itself administrator access.",
-            calls,
+            settled[2] if settled is not None else calls,
         )
 
     static = (
@@ -581,6 +670,11 @@ def _verify_admin_grant(
     )
 
     if not statements:
+        settled = _ask_simulator_when_blind(
+            source, kind, name, ["iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:CreatePolicyVersion"], calls
+        )
+        if settled is not None:
+            return settled
         return (
             VerdictStatus.UNVERIFIABLE,
             f"Could not resolve the policy documents attached to '{name}'.",
