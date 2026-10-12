@@ -18,3 +18,5 @@ dist/
 # Editor / OS
 .DS_Store
 Thumbs.db
+
+backend/results/

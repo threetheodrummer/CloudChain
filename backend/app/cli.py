@@ -130,6 +130,56 @@ def _run_plan(args) -> int:
     return 1 if analysis["verdict"] == "BLOCK" else 0
 
 
+def _run_validate(args) -> int:
+    """Re-check every path in a stored scan, read-only.
+
+    Real-mode scans use the ambient AWS credentials (AWS_PROFILE etc.), the
+    same way `scan --mode real` does. Nothing is changed in the account.
+    """
+    from app.sources import get_data_sources
+    from app.validation import validate_paths
+
+    if args.scan:
+        result = get_scan(args.scan)
+        if result is None:
+            print(f"No scan found with id {args.scan!r}", file=sys.stderr)
+            return 2
+    else:
+        recent = list_scans(mode=args.mode, limit=1)
+        if not recent:
+            print("No scans recorded yet.", file=sys.stderr)
+            return 2
+        result = recent[0]
+
+    paths = list(result.attack_paths) + list(result.escalation_paths)
+    sources = get_data_sources(result.mode, region=args.region)
+    validations = validate_paths(paths, sources, result.graph)
+    kinds = {p.path_id: p.entry_kind for p in paths}
+
+    if args.json:
+        print(json.dumps(
+            {
+                "scan_id": result.scan_id,
+                "mode": result.mode,
+                "validations": [
+                    dict(v.model_dump(mode="json"), entry_kind=kinds.get(v.path_id, ""))
+                    for v in validations
+                ],
+            },
+            indent=2,
+            default=str,
+        ))
+        return 0
+
+    print(f"\nValidation of scan {result.scan_id} ({result.mode} mode): {len(validations)} path(s)")
+    for v in validations:
+        print(f"\n[{v.status.value}] {v.path_id} ({kinds.get(v.path_id, '')})")
+        print(f"  {v.summary}")
+        for h in v.hops:
+            print(f"   hop {h.index} [{h.status.value}] {h.relation}: {h.reason}")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cloudchain")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -168,7 +218,16 @@ def main() -> None:
     plan_p.add_argument("--baseline", default=None, help="Scan id to diff against (default: latest)")
     plan_p.add_argument("--format", choices=["text", "markdown", "json"], default="text")
 
+    val_p = sub.add_parser("validate", help="Re-check every path in a stored scan (read-only)")
+    val_p.add_argument("--scan", default=None, help="Scan id (default: latest scan of --mode)")
+    val_p.add_argument("--mode", choices=["demo", "real"], default="real")
+    val_p.add_argument("--region", default=None)
+    val_p.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
+
+    if args.command == "validate":
+        return _run_validate(args)
 
     if args.command == "plan":
         return _run_plan(args)
