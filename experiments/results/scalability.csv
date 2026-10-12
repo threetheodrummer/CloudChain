@@ -1,0 +1,13 @@
+identities,search,median_seconds,status,findings,graph_nodes,graph_edges,attack_paths,escalation_paths,max_path_hops
+30,hop_limit_6,0.0029,ok,29,28,12,0,3,2
+30,unbounded,0.002,ok,29,28,12,0,3,2
+100,hop_limit_6,0.0076,ok,69,67,49,0,29,2
+100,unbounded,0.0049,ok,69,67,49,0,29,2
+300,hop_limit_6,0.0132,ok,179,157,101,1,69,3
+300,unbounded,0.016,ok,179,157,101,1,69,3
+1000,hop_limit_6,0.0535,ok,617,541,436,0,293,2
+1000,unbounded,0.0695,ok,617,541,436,0,293,2
+3000,hop_limit_6,0.3274,ok,1931,1659,3540,83,3125,4
+3000,unbounded,0.3167,ok,1931,1659,3540,83,3125,4
+10000,hop_limit_6,2.6052,ok,6394,5531,44224,860,42892,5
+10000,unbounded,2.6548,ok,6394,5531,44224,860,42892,5

@@ -1,0 +1,53 @@
+parameter,factor,kendall_tau_min,kendall_tau_mean,top10_overlap_mean,posture_abs_change_mean,posture_abs_change_max,grade_changed_fraction
+finding: internet-facing multiplier,0.5,0.841,0.963,0.909,0,0,0.0
+finding: internet-facing multiplier,0.75,0.935,0.985,0.991,0,0,0.0
+finding: internet-facing multiplier,1.25,0.939,0.956,0.764,0,0,0.0
+finding: internet-facing multiplier,1.5,0.939,0.954,0.764,0,0,0.0
+finding: sensitive multiplier,0.5,0.947,0.976,0.836,0,0,0.0
+finding: sensitive multiplier,0.75,0.999,1.0,0.982,0,0,0.0
+finding: sensitive multiplier,1.25,0.999,1.0,0.982,0,0,0.0
+finding: sensitive multiplier,1.5,0.999,1.0,0.982,0,0,0.0
+finding: attack-path multiplier,0.5,0.86,0.973,0.927,0,0,0.0
+finding: attack-path multiplier,0.75,0.935,0.984,0.973,0,0,0.0
+finding: attack-path multiplier,1.25,0.963,0.996,0.973,0,0,0.0
+finding: attack-path multiplier,1.5,0.963,0.993,0.945,0,0,0.0
+finding: CRITICAL base weight,0.5,0.791,0.838,0.545,0,0,0.0
+finding: CRITICAL base weight,0.75,0.939,0.955,0.745,0,0,0.0
+finding: CRITICAL base weight,1.25,0.999,1.0,0.982,0,0,0.0
+finding: CRITICAL base weight,1.5,0.993,0.999,0.982,0,0,0.0
+finding: HIGH base weight,0.5,0.915,0.934,0.945,0,0,0.0
+finding: HIGH base weight,0.75,0.958,0.996,0.973,0,0,0.0
+finding: HIGH base weight,1.25,0.939,0.955,0.745,0,0,0.0
+finding: HIGH base weight,1.5,0.939,0.952,0.736,0,0,0.0
+posture: exposure weight,0.5,1.0,1.0,1.0,11.09,13,0.364
+posture: exposure weight,0.75,1.0,1.0,1.0,5.73,7,0.273
+posture: exposure weight,1.25,1.0,1.0,1.0,5.64,7,0.091
+posture: exposure weight,1.5,1.0,1.0,1.0,11.18,13,0.182
+posture: privilege weight,0.5,1.0,1.0,1.0,12.45,13,0.364
+posture: privilege weight,0.75,1.0,1.0,1.0,6.36,7,0.273
+posture: privilege weight,1.25,1.0,1.0,1.0,6.27,7,0.091
+posture: privilege weight,1.5,1.0,1.0,1.0,12.55,13,0.182
+posture: reachability weight,0.5,1.0,1.0,1.0,9.91,13,0.364
+posture: reachability weight,0.75,1.0,1.0,1.0,5.18,7,0.182
+posture: reachability weight,1.25,1.0,1.0,1.0,5.09,6,0.091
+posture: reachability weight,1.5,1.0,1.0,1.0,9.82,12,0.091
+posture: blast-radius weight,0.5,1.0,1.0,1.0,0.64,4,0.091
+posture: blast-radius weight,0.75,1.0,1.0,1.0,0.36,2,0.0
+posture: blast-radius weight,1.25,1.0,1.0,1.0,0.36,1,0.091
+posture: blast-radius weight,1.5,1.0,1.0,1.0,0.55,3,0.091
+posture: internet-path floor,0.5,1.0,1.0,1.0,4.91,9,0.0
+posture: internet-path floor,0.75,1.0,1.0,1.0,2.36,5,0.0
+posture: internet-path floor,1.25,1.0,1.0,1.0,2.55,5,0.0
+posture: internet-path floor,1.5,1.0,1.0,1.0,3.91,9,0.0
+posture: escalation-only floor,0.5,1.0,1.0,1.0,2.45,6,0.273
+posture: escalation-only floor,0.75,1.0,1.0,1.0,1.18,3,0.182
+posture: escalation-only floor,1.25,1.0,1.0,1.0,1.09,3,0.091
+posture: escalation-only floor,1.5,1.0,1.0,1.0,2.45,6,0.091
+posture: exposure saturation,0.5,1.0,1.0,1.0,2.64,8,0.091
+posture: exposure saturation,0.75,1.0,1.0,1.0,2,6,0.091
+posture: exposure saturation,1.25,1.0,1.0,1.0,2.09,5,0.182
+posture: exposure saturation,1.5,1.0,1.0,1.0,4.27,8,0.182
+posture: privilege saturation,0.5,1.0,1.0,1.0,0,0,0.0
+posture: privilege saturation,0.75,1.0,1.0,1.0,0,0,0.0
+posture: privilege saturation,1.25,1.0,1.0,1.0,0.36,4,0.0
+posture: privilege saturation,1.5,1.0,1.0,1.0,0.73,8,0.0
