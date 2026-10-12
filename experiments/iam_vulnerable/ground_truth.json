@@ -1,0 +1,548 @@
+{
+ "privesc-AssumeRole": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-AssumeRole-start-user"
+  ],
+  "roles": [
+   "privesc-AssumeRole-starting-role",
+   "privesc-AssumeRole-intermediate-role",
+   "privesc-AssumeRole-ending-role"
+  ],
+  "policies": [
+   "privesc-AssumeRole-high-priv-policy"
+  ]
+ },
+ "privesc-cloudFormationUpdateStack": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-CloudFormationUpdateStack-user"
+  ],
+  "roles": [
+   "privesc-CloudFormationUpdateStack-role"
+  ],
+  "policies": [
+   "privesc-CloudFormationUpdateStack"
+  ]
+ },
+ "privesc-codeBuildCreateProjectPassRole": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-codeBuildCreateProjectPassRole-user"
+  ],
+  "roles": [
+   "privesc-codeBuildCreateProjectPassRole-role"
+  ],
+  "policies": [
+   "privesc-codeBuildCreateProjectPassRole-policy"
+  ]
+ },
+ "privesc-ec2InstanceConnect": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-ec2InstanceConnect-user"
+  ],
+  "roles": [
+   "privesc-ec2InstanceConnect-role"
+  ],
+  "policies": [
+   "privesc-ec2InstanceConnect-policy"
+  ]
+ },
+ "privesc-sageMakerCreateNotebookPassRole": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-sageMakerCreateNotebookPassRole-user"
+  ],
+  "roles": [
+   "privesc-sageMakerCreateNotebookPassRole-role"
+  ],
+  "policies": [
+   "privesc-sageMakerCreateNotebookPassRole-policy"
+  ]
+ },
+ "privesc-sageMakerCreatePresignedNotebookURL": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-sageMakerCreatePresignedNotebookURL-user"
+  ],
+  "roles": [
+   "privesc-sageMakerCreatePresignedNotebookURL-role"
+  ],
+  "policies": [
+   "privesc-sageMakerCreatePresignedNotebookURL-policy"
+  ]
+ },
+ "privesc-sageMakerCreateProcessingJob": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-sageMakerCreateProcessingJobPassRole-user"
+  ],
+  "roles": [
+   "privesc-sageMakerCreateProcessingJobPassRole-role"
+  ],
+  "policies": [
+   "privesc-sageMakerCreateProcessingJobPassRole-policy"
+  ]
+ },
+ "privesc-sageMakerCreateTrainingJob": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-sageMakerCreateTrainingJobPassRole-user"
+  ],
+  "roles": [
+   "privesc-sageMakerCreateTrainingJobPassRole-role"
+  ],
+  "policies": [
+   "privesc-sageMakerCreateTrainingJobPassRole-policy"
+  ]
+ },
+ "privesc-ssmSendCommand": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-ssmSendCommand-user"
+  ],
+  "roles": [
+   "privesc-ssmSendCommand-role"
+  ],
+  "policies": [
+   "privesc-ssmSendCommand-policy"
+  ]
+ },
+ "privesc-ssmStartSession": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-ssmStartSession-user"
+  ],
+  "roles": [
+   "privesc-ssmStartSession-role"
+  ],
+  "policies": [
+   "privesc-ssmStartSession-policy"
+  ]
+ },
+ "privesc1-CreateNewPolicyVersion": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc1-CreateNewPolicyVersion-user"
+  ],
+  "roles": [
+   "privesc1-CreateNewPolicyVersion-role"
+  ],
+  "policies": [
+   "privesc1-CreateNewPolicyVersion"
+  ]
+ },
+ "privesc10-PutUserPolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc10-PutUserPolicy-user"
+  ],
+  "roles": [
+   "privesc10-PutUserPolicy-role"
+  ],
+  "policies": [
+   "privesc10-PutUserPolicy"
+  ]
+ },
+ "privesc11-PutGroupPolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc11-PutGroupPolicy-user"
+  ],
+  "roles": [
+   "privesc11-PutGroupPolicy-role"
+  ],
+  "policies": [
+   "privesc11-PutGroupPolicy"
+  ]
+ },
+ "privesc12-PutRolePolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc12-PutRolePolicy-user"
+  ],
+  "roles": [
+   "privesc12-PutRolePolicy-role"
+  ],
+  "policies": [
+   "privesc12-PutRolePolicy"
+  ]
+ },
+ "privesc13-AddUserToGroup": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc13-AddUserToGroup-user"
+  ],
+  "roles": [
+   "privesc13-AddUserToGroup-role"
+  ],
+  "policies": [
+   "privesc13-AddUserToGroup"
+  ]
+ },
+ "privesc14-UpdatingAssumeRolePolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc14-UpdatingAssumeRolePolicy-user"
+  ],
+  "roles": [
+   "privesc14-UpdatingAssumeRolePolicy-role"
+  ],
+  "policies": [
+   "privesc14-UpdatingAssumeRolePolicy"
+  ]
+ },
+ "privesc15-PassExistingRoleToNewLambdaThenInvoke": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc15-PassExistingRoleToNewLambdaThenInvoke-user"
+  ],
+  "roles": [
+   "privesc15-PassExistingRoleToNewLambdaThenInvoke-role"
+  ],
+  "policies": [
+   "privesc15-PassExistingRoleToNewLambdaThenInvoke"
+  ]
+ },
+ "privesc16-PassRoleToNewLambdaThenTriggerWithNewDynamo": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc16-PassRoleToNewLambdaThenTriggerWithNewDynamo-user"
+  ],
+  "roles": [
+   "privesc16-PassRoleToNewLambdaThenTriggerWithNewDynamo-role"
+  ],
+  "policies": [
+   "privesc16-PassRoleToNewLambdaThenTriggerWithNewDynamo"
+  ]
+ },
+ "privesc17-EditExistingLambdaFunctionWithRole": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc17-EditExistingLambdaFunctionWithRole-user"
+  ],
+  "roles": [
+   "privesc17-EditExistingLambdaFunctionWithRole-role"
+  ],
+  "policies": [
+   "privesc17-EditExistingLambdaFunctionWithRole"
+  ]
+ },
+ "privesc18-PassExistingRoleToNewGlueDevEndpoint": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc18-PassExistingRoleToNewGlueDevEndpoint-user"
+  ],
+  "roles": [
+   "privesc18-PassExistingRoleToNewGlueDevEndpoint-role"
+  ],
+  "policies": [
+   "privesc18-PassExistingRoleToNewGlueDevEndpoint"
+  ]
+ },
+ "privesc19-UpdateExistingGlueDevEndpoint": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc19-UpdateExistingGlueDevEndpoint-user"
+  ],
+  "roles": [
+   "privesc19-UpdateExistingGlueDevEndpoint-role"
+  ],
+  "policies": [
+   "privesc19-UpdateExistingGlueDevEndpoint"
+  ]
+ },
+ "privesc2-SetExistingDefaultPolicyVersion": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc2-SetExistingDefaultPolicyVersion-user"
+  ],
+  "roles": [
+   "privesc2-SetExistingDefaultPolicyVersion-role"
+  ],
+  "policies": [
+   "privesc2-SetExistingDefaultPolicyVersion"
+  ]
+ },
+ "privesc20-PassExistingRoleToCloudFormation": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc20-PassExistingRoleToCloudFormation-user"
+  ],
+  "roles": [
+   "privesc20-PassExistingRoleToCloudFormation-role"
+  ],
+  "policies": [
+   "privesc20-PassExistingRoleToCloudFormation"
+  ]
+ },
+ "privesc21-PassExistingRoleToNewDataPipeline": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc21-PassExistingRoleToNewDataPipeline-user"
+  ],
+  "roles": [
+   "privesc21-PassExistingRoleToNewDataPipeline-role"
+  ],
+  "policies": [
+   "privesc21-PassExistingRoleToNewDataPipeline"
+  ]
+ },
+ "privesc3-CreateEC2WithExistingIP": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc3-CreateEC2WithExistingInstanceProfile-user"
+  ],
+  "roles": [
+   "privesc3-CreateEC2WithExistingInstanceProfile-role"
+  ],
+  "policies": [
+   "privesc3-CreateEC2WithExistingInstanceProfile"
+  ]
+ },
+ "privesc4-CreateAccessKey": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc4-CreateAccessKey-user"
+  ],
+  "roles": [
+   "privesc4-CreateAccessKey-role"
+  ],
+  "policies": [
+   "privesc4-CreateAccessKey"
+  ]
+ },
+ "privesc5-CreateLoginProfile": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc5-CreateLoginProfile-user"
+  ],
+  "roles": [
+   "privesc5-CreateLoginProfile-role"
+  ],
+  "policies": [
+   "privesc5-CreateLoginProfile"
+  ]
+ },
+ "privesc6-UpdateLoginProfile": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc6-UpdateLoginProfile-user"
+  ],
+  "roles": [
+   "privesc6-UpdateLoginProfile-role"
+  ],
+  "policies": [
+   "privesc6-UpdateLoginProfile"
+  ]
+ },
+ "privesc7-AttachUserPolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc7-AttachUserPolicy-user"
+  ],
+  "roles": [
+   "privesc7-AttachUserPolicy-role"
+  ],
+  "policies": [
+   "privesc7-AttachUserPolicy"
+  ]
+ },
+ "privesc8-AttachGroupPolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc8-AttachGroupPolicy-user"
+  ],
+  "roles": [
+   "privesc8-AttachGroupPolicy-role"
+  ],
+  "policies": [
+   "privesc8-AttachGroupPolicy"
+  ]
+ },
+ "privesc9-AttachRolePolicy": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc9-AttachRolePolicy-user"
+  ],
+  "roles": [
+   "privesc9-AttachRolePolicy-role"
+  ],
+  "policies": [
+   "privesc9-AttachRolePolicy"
+  ]
+ },
+ "sre": {
+  "module": "privesc-paths",
+  "label": "positive",
+  "users": [
+   "privesc-sre-user"
+  ],
+  "roles": [
+   "privesc-sre-role"
+  ],
+  "policies": [
+   "privesc-sre-admin-policy"
+  ]
+ },
+ "fn1-privesc3-multiple-policies": {
+  "module": "tool-testing",
+  "label": "positive",
+  "users": [
+   "fn1-privesc3-partial-user"
+  ],
+  "roles": [
+   "fn1-privesc3-partial-role"
+  ],
+  "policies": [
+   "fn1-privesc3-partial",
+   "fn1-passrole-star"
+  ]
+ },
+ "fn2-ExploitableResourceConstraint": {
+  "module": "tool-testing",
+  "label": "positive",
+  "users": [
+   "fn2-exploitableResourceConstraint-user"
+  ],
+  "roles": [
+   "fn2-exploitableResourceConstraint-role"
+  ],
+  "policies": [
+   "fn2-exploitableResourceConstraint"
+  ]
+ },
+ "fn3-ExploitableConditionConstraint": {
+  "module": "tool-testing",
+  "label": "positive",
+  "users": [
+   "fn3-exploitableConditionConstraint-user"
+  ],
+  "roles": [
+   "fn3-exploitableConditionConstraint-role"
+  ],
+  "policies": [
+   "fn3-exploitableConditionConstraint"
+  ]
+ },
+ "fn4-ExploitableNotAction": {
+  "module": "tool-testing",
+  "label": "positive",
+  "users": [
+   "fn4-exploitableNotAction-user"
+  ],
+  "roles": [
+   "fn4-exploitableNotAction-role"
+  ],
+  "policies": [
+   "fn4-exploitableNotAction"
+  ]
+ },
+ "fp1-allow-and-deny-same-policy": {
+  "module": "tool-testing",
+  "label": "negative",
+  "users": [
+   "fp1-allow-and-deny-user"
+  ],
+  "roles": [
+   "fp1-allow-and-deny-role"
+  ],
+  "policies": [
+   "fp1-allow-and-deny"
+  ]
+ },
+ "fp2-allow-and-deny-multiple-policies": {
+  "module": "tool-testing",
+  "label": "negative",
+  "users": [
+   "fp2-allow-and-deny-multiple-policies-user"
+  ],
+  "roles": [
+   "fp2-allow-and-deny-multiple-policies-role"
+  ],
+  "policies": [
+   "fp2-allow-all",
+   "deny-all"
+  ]
+ },
+ "fp3-deny": {
+  "module": "tool-testing",
+  "label": "negative",
+  "users": [
+   "fp3-deny-iam-user"
+  ],
+  "roles": [
+   "fp3-deny-iam-role"
+  ],
+  "policies": [
+   "fp3-deny-iam"
+  ]
+ },
+ "fp4-NonExploitableResourceConstraint": {
+  "module": "tool-testing",
+  "label": "negative",
+  "users": [
+   "fp4-nonExploitableResourceConstraint-user"
+  ],
+  "roles": [
+   "fp4-nonExploitableResourceConstraint-role"
+  ],
+  "policies": [
+   "fp4-nonExploitableResourceConstraint"
+  ]
+ },
+ "fp5-NonExploitableConditionConstraint": {
+  "module": "tool-testing",
+  "label": "negative",
+  "users": [
+   "fp5-nonExploitableConditionConstraint-user"
+  ],
+  "roles": [
+   "fp5-nonExploitableConditionConstraint-role"
+  ],
+  "policies": [
+   "fp5-nonExploitableConditionConstraint"
+  ]
+ },
+ "privesc-permissive-role-trust": {
+  "module": "tool-testing",
+  "label": "positive",
+  "users": [],
+  "roles": [
+   "privesc-permissive-role-trust"
+  ],
+  "policies": []
+ }
+}

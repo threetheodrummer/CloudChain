@@ -305,3 +305,52 @@ def test_empty_policies_without_simulator_stay_unverifiable():
 
     v = validate_path(path, Blind(account_id=PROD), graph)
     assert v.status is VerdictStatus.UNVERIFIABLE
+
+
+def test_validation_reads_each_fact_once_per_run(demo_scan):
+    """Routes share hops; a run must not repeat the same AWS read."""
+    calls = []
+
+    class Counting(DemoAWSDataSource):
+        def get_identity_policy_statements(self, identity_type, name):
+            calls.append((identity_type, name))
+            return super().get_identity_policy_statements(identity_type, name)
+
+    paths = demo_scan.attack_paths + demo_scan.escalation_paths
+    validate_paths(paths, Counting(account_id=PROD), demo_scan.graph)
+    assert len(calls) == len(set(calls))
+
+
+def test_resource_scoped_grant_is_simulated_against_its_own_resources():  # fn2
+    path, graph = _self_escalation_path()
+    seen = {}
+
+    class Scoped(_Simulated):
+        def get_identity_policy_statements(self, identity_type, name):
+            return [("iam:CreatePolicyVersion", "arn:aws:iam::*:policy/app-*")]
+
+        def simulate_principal_policy(self, principal_arn, actions, resource_arns=None):
+            seen["resources"] = list(resource_arns or [])
+            return {a: {"decision": "implicitDeny", "allowed_by_boundary": None,
+                        "allowed_by_organizations": None, "missing_context": []} for a in actions}
+
+    v = validate_path(path, Scoped(account_id=PROD), graph)
+    assert seen["resources"] == [f"arn:aws:iam::{PROD}:policy/app-*"]
+    # An implicit deny with no SCP, boundary or explicit Deny behind it does not
+    # prove a resource-scoped grant is gone.
+    assert v.status is VerdictStatus.UNVERIFIABLE
+
+
+def test_scp_denial_of_a_scoped_grant_still_refutes():
+    path, graph = _self_escalation_path()
+
+    class ScopedScp(_Simulated):
+        def get_identity_policy_statements(self, identity_type, name):
+            return [("iam:CreatePolicyVersion", "arn:aws:iam::*:policy/app-*")]
+
+        def simulate_principal_policy(self, principal_arn, actions, resource_arns=None):
+            return {a: {"decision": "explicitDeny", "allowed_by_boundary": None,
+                        "allowed_by_organizations": False, "missing_context": []} for a in actions}
+
+    v = validate_path(path, ScopedScp(account_id=PROD), graph)
+    assert v.status is VerdictStatus.REFUTED

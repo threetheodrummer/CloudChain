@@ -1,0 +1,552 @@
+{
+ "privesc-AssumeRole-high-priv-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": "*",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-CloudFormationUpdateStack": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Sid": "VisualEditor0",
+    "Effect": "Allow",
+    "Action": [
+     "cloudformation:UpdateStack",
+     "cloudformation:DescribeStacks"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-codeBuildCreateProjectPassRole-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "codebuild:CreateProject",
+     "codebuild:StartBuild",
+     "codebuild:StartBuildBatch",
+     "iam:PassRole",
+     "iam:ListRoles"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-ec2InstanceConnect-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "ec2:DescribeInstances",
+     "ec2-instance-connect:SendSSHPublicKey",
+     "ec2-instance-connect:SendSerialConsoleSSHPublicKey"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-sageMakerCreateNotebookPassRole-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "sagemaker:CreateNotebookInstance",
+     "sagemaker:CreatePresignedNotebookInstanceUrl",
+     "sagemaker:ListNotebookInstances",
+     "sagemaker:DescribeNotebookInstance",
+     "sagemaker:StopNotebookInstance",
+     "sagemaker:DeleteNotebookInstance",
+     "iam:PassRole",
+     "iam:ListRoles"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-sageMakerCreatePresignedNotebookURL-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "sagemaker:CreatePresignedNotebookInstanceUrl",
+     "sagemaker:ListNotebookInstances"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-sageMakerCreateProcessingJobPassRole-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "sagemaker:CreateProcessingJob",
+     "iam:PassRole"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-sageMakerCreateTrainingJobPassRole-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "sagemaker:CreateTrainingJob",
+     "iam:PassRole"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-ssmSendCommand-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "ec2:DescribeInstances",
+     "ssm:listCommands",
+     "ssm:listCommandInvocations",
+     "ssm:sendCommand"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-ssmStartSession-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": [
+     "ec2:DescribeInstances",
+     "ssm:StartSession",
+     "ssm:DescribeSessions",
+     "ssm:GetConnectionStatus",
+     "ssm:DescribeInstanceProperties",
+     "ssm:TerminateSession",
+     "ssm:ResumeSession"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc1-CreateNewPolicyVersion": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:CreatePolicyVersion",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc10-PutUserPolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:PutUserPolicy",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc11-PutGroupPolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:PutGroupPolicy",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc12-PutRolePolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:PutRolePolicy",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc13-AddUserToGroup": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:AddUserToGroup",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc14-UpdatingAssumeRolePolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "iam:UpdateAssumeRolePolicy",
+     "sts:AssumeRole"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc15-PassExistingRoleToNewLambdaThenInvoke": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "iam:PassRole",
+     "lambda:CreateFunction",
+     "lambda:InvokeFunction"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc16-PassRoleToNewLambdaThenTriggerWithNewDynamo": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "lambda:CreateFunction",
+     "iam:PassRole",
+     "lambda:CreateEventSourceMapping"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc17-EditExistingLambdaFunctionWithRole": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "lambda:UpdateFunctionCode",
+     "lambda:UpdateFunctionConfiguration"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc18-PassExistingRoleToNewGlueDevEndpoint": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "glue:CreateDevEndpoint",
+     "glue:GetDevEndpoint",
+     "iam:PassRole"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc19-UpdateExistingGlueDevEndpoint": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "glue:UpdateDevEndpoint",
+     "glue:GetDevEndpoint"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc2-SetExistingDefaultPolicyVersion": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:SetDefaultPolicyVersion",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc20-PassExistingRoleToCloudFormation": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Sid": "VisualEditor0",
+    "Effect": "Allow",
+    "Action": [
+     "iam:PassRole",
+     "cloudformation:CreateStack",
+     "cloudformation:DescribeStacks"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc21-PassExistingRoleToNewDataPipeline": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": "iam:PassRole",
+    "Resource": "*"
+   },
+   {
+    "Effect": "Allow",
+    "Action": [
+     "datapipeline:CreatePipeline",
+     "datapipeline:PutPipelineDefinition",
+     "datapipeline:ActivatePipeline"
+    ],
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc3-CreateEC2WithExistingInstanceProfile": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "iam:PassRole",
+     "ec2:DescribeInstances",
+     "ec2:RunInstances",
+     "ec2:CreateKeyPair",
+     "ec2:AssociateIamInstanceProfile"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc4-CreateAccessKey": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:CreateAccessKey",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc5-CreateLoginProfile": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:CreateLoginProfile",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc6-UpdateLoginProfile": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:UpdateLoginProfile",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc7-AttachUserPolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:AttachUserPolicy",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc8-AttachGroupPolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:AttachGroupPolicy",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc9-AttachRolePolicy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:AttachRolePolicy",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-high-priv-service-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "*",
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "privesc-sre-admin-policy": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "iam:*",
+     "ec2:*",
+     "s3:*"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fn1-privesc3-partial": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "ec2:DescribeInstances",
+     "ec2:RunInstances"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fn1-passrole-star": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": [
+     "iam:PassRole"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fn2-exploitableResourceConstraint": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:CreatePolicyVersion",
+    "Effect": "Allow",
+    "Resource": "arn:aws:iam::*:policy/fn2-*"
+   }
+  ]
+ },
+ "fn3-exploitableConditionConstraint": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "sts:AssumeRole",
+    "Effect": "Allow",
+    "Sid": "",
+    "Principal": {
+     "AWS": "*"
+    }
+   }
+  ]
+ },
+ "fn4-exploitableNotAction": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "NotAction": [
+     "iam:Update*",
+     "iam:Create*",
+     "iam:Attach*"
+    ],
+    "Effect": "Allow",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fp1-allow-and-deny": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": "iam:*",
+    "Resource": "*"
+   },
+   {
+    "Effect": "Deny",
+    "Action": "iam:*",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fp2-allow-all": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Allow",
+    "Action": "*",
+    "Resource": "*"
+   }
+  ]
+ },
+ "deny-all": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Deny",
+    "Action": "*",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fp3-deny-iam": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Effect": "Deny",
+    "Action": "iam:*",
+    "Resource": "*"
+   }
+  ]
+ },
+ "fp4-nonExploitableResourceConstraint": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "iam:CreatePolicyVersion",
+    "Effect": "Allow",
+    "Resource": "arn:aws:iam::aws:policy/fp4-*"
+   }
+  ]
+ },
+ "fp5-nonExploitableConditionConstraint": {
+  "Version": "2012-10-17",
+  "Statement": [
+   {
+    "Action": "sts:AssumeRole",
+    "Effect": "Allow",
+    "Sid": "",
+    "Principal": {
+     "AWS": "*"
+    }
+   }
+  ]
+ }
+}

@@ -21,11 +21,20 @@ from app.models import Finding, Severity
 from app.scanners import policy
 from app.sources import AWSDataSource
 
+# Actions that create something which then runs as a role passed to it with
+# iam:PassRole. From the published AWS escalation catalogue (Gietzen, Rhino
+# Security Labs). Invoking or updating an existing function is not here: it
+# needs no PassRole, and is covered by RESOURCE_DEPENDENT_PRIMITIVES instead.
 COMPUTE_CREATE_ACTIONS = {
     "lambda:CreateFunction",
-    "lambda:InvokeFunction",
-    "lambda:UpdateFunctionCode",
     "ec2:RunInstances",
+    "cloudformation:CreateStack",
+    "codebuild:CreateProject",
+    "datapipeline:CreatePipeline",
+    "glue:CreateDevEndpoint",
+    "sagemaker:CreateNotebookInstance",
+    "sagemaker:CreateTrainingJob",
+    "sagemaker:CreateProcessingJob",
 }
 
 
@@ -180,8 +189,13 @@ class IAMScanner:
         for user in self.source.list_iam_users():
             access_keys = self.source.list_access_keys(user)
             has_mfa = self.source.user_has_mfa(user)
+            # MFA protects a console sign-in. A key-only user has no password for
+            # it to protect; its exposure is the long-lived key, which the stale
+            # key check covers. Flagging it anyway was most of the noise on real
+            # accounts.
+            console = self.source.has_console_password(user)
 
-            if not has_mfa:
+            if not has_mfa and console:
                 findings.append(
                     Finding(
                         resource_id=user,
@@ -285,8 +299,34 @@ class IAMScanner:
         # An identity that already holds admin hasn't escalated to it.
         if policy.is_full_admin(statements):
             return []
+
+        out: List[Finding] = []
+        dependent = policy.find_resource_dependent_primitives(statements)
+        if dependent:
+            label = "IAM user" if resource_type == "iam_user" else "IAM role"
+            out.append(
+                Finding(
+                    resource_id=name,
+                    resource_type=resource_type,
+                    issue_code="IAM_RESOURCE_ROLE_ABUSE_RISK",
+                    title=f"{label} '{name}' can take over the role of an existing resource",
+                    description=(
+                        "This identity "
+                        + "; ".join(f"holds {a}, so it {why}" for a, why in dependent)
+                        + ". How far this reaches depends on which roles those resources run "
+                        "as, which CloudChain does not scan, so no route is drawn."
+                    ),
+                    base_severity=Severity.HIGH,
+                    remediation=(
+                        "Remove these actions, or scope them to resources whose roles hold "
+                        "no more privilege than this identity already has."
+                    ),
+                    evidence={"policies": policy_names, "resource_dependent_actions": [a for a, _ in dependent]},
+                )
+            )
+
         if not ((has_passrole and compute) or primitives):
-            return []
+            return out
 
         reasons: List[str] = []
         if has_passrole and compute:
@@ -304,7 +344,7 @@ class IAMScanner:
         )
 
         label = "IAM user" if resource_type == "iam_user" else "IAM role"
-        return [
+        return out + [
             Finding(
                 resource_id=name,
                 resource_type=resource_type,
@@ -404,8 +444,33 @@ class IAMScanner:
                 if acct and acct != this_account
             }
         )
+        internal = [
+            p for p in principals
+            if this_account
+            and _account_from_arn(p) == this_account
+            and _principal_name_from_arn(p)[0]
+        ]
+        same_account: List[Finding] = []
+        if internal and not classify_role(role, self.source.get_role_path(role)) != NORMAL:
+            is_admin_role = policy.is_admin_equivalent(statements)
+            same_account.append(
+                Finding(
+                    resource_id=role,
+                    resource_type="iam_role",
+                    issue_code="IAM_ROLE_ASSUMABLE_IN_ACCOUNT",
+                    title=f"IAM role '{role}' can be assumed by {len(internal)} named principal(s) in this account",
+                    description=(
+                        "The trust policy names specific users or roles in this account. In "
+                        "the same account that is enough to assume the role, so each of them "
+                        "holds this role's permissions."
+                    ),
+                    base_severity=Severity.MEDIUM if is_admin_role else Severity.LOW,
+                    remediation="Keep the trust policy to the principals that need the role.",
+                    evidence={"trusted_principals": internal, "grants_admin": is_admin_role},
+                )
+            )
         if not external:
-            return []
+            return same_account
 
         is_admin = policy.is_admin_equivalent(statements)
         path = self.source.get_role_path(role)
@@ -416,7 +481,7 @@ class IAMScanner:
             # Expected infrastructure, or something a human declared benign.
             # Still surfaced -- the trusted account should be one you recognise
             # -- but calling it CRITICAL drowns the actionable findings.
-            return [
+            return same_account + [
                 Finding(
                     resource_id=role,
                     resource_type="iam_role",
@@ -444,7 +509,7 @@ class IAMScanner:
                 )
             ]
 
-        return [
+        return same_account + [
             Finding(
                 resource_id=role,
                 resource_type="iam_role",

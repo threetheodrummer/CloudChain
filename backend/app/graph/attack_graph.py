@@ -62,6 +62,7 @@ _RELATION_TEMPLATES = {
     "including {tgt}, into a new Lambda function or EC2 instance",
     "can_assume_cross_account": "{src} is named in the trust policy of {tgt} and can cross the "
     "account boundary with sts:AssumeRole",
+    "can_assume_role": "{src} is named in the trust policy of {tgt} and can assume it",
     "can_escalate_to_admin": "{src} holds IAM write permissions and can grant itself {tgt}",
     "grants_admin_access": "{src} is granted AdministratorAccess ({tgt})",
     "has_admin_policy": "{src} directly holds an unrestricted (*:*) policy, i.e. {tgt}",
@@ -150,6 +151,7 @@ def build_attack_graph(findings: List[Finding]) -> Tuple[nx.DiGraph, Dict[str, L
     _wire_leaked_credentials(g, by_issue)
     _wire_privilege_escalation(g, by_issue)
     _wire_cross_account_trust(g, by_issue)
+    _wire_same_account_trust(g, by_issue)
     _wire_admin_sink(g, by_issue)
 
     return g, findings_by_resource
@@ -232,6 +234,32 @@ def _wire_cross_account_trust(g: nx.DiGraph, by_issue: Dict[str, List[Finding]])
             principal_node = node_id(kind, name, src_account)
             if g.has_node(principal_node):
                 g.add_edge(principal_node, role_node, relation="can_assume_cross_account")
+
+
+def _wire_same_account_trust(g: nx.DiGraph, by_issue: Dict[str, List[Finding]]) -> None:
+    """sts:AssumeRole inside one account, from a trust policy naming the principal.
+
+    Within an account, a trust policy that names a specific user or role is
+    sufficient on its own for that principal to assume the role. Trust in the
+    account root is not drawn: it needs a matching identity-policy grant, which
+    this edge does not check.
+    """
+    from app.scanners.iam_scanner import _account_from_arn, _principal_name_from_arn
+
+    for f in by_issue.get("IAM_ROLE_ASSUMABLE_IN_ACCOUNT", []):
+        role_node = node_id("iam_role", f.resource_id, f.account_id)
+        for arn in f.evidence.get("trusted_principals", []):
+            kind, name = _principal_name_from_arn(arn)
+            if not kind:
+                continue
+            src = node_id(kind, name, _account_from_arn(arn) or f.account_id)
+            if not g.has_node(src):
+                g.add_node(src, type=kind, label=name, account_id=f.account_id,
+                           account_name=f.account_name, issue_codes=[])
+            if not g.has_node(role_node):
+                g.add_node(role_node, type="iam_role", label=f.resource_id,
+                           account_id=f.account_id, account_name=f.account_name, issue_codes=[])
+            g.add_edge(src, role_node, relation="can_assume_role")
 
 
 def _wire_admin_sink(g: nx.DiGraph, by_issue: Dict[str, List[Finding]]) -> None:
@@ -373,6 +401,13 @@ def find_escalation_paths(
     paths: List[AttackPath] = []
 
     for start in identities:
+        # An administrator hasn't escalated. Routes that start at one are
+        # noise: every role it is trusted by would otherwise appear as a route.
+        if any(
+            g.edges[start, nxt]["relation"] in ("has_admin_policy", "grants_admin_access")
+            for nxt in g.successors(start)
+        ):
+            continue
         for sink in sorted(sinks):
             if start == sink:
                 continue

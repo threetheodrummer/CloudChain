@@ -210,6 +210,17 @@ def _simulate(
             blockers.append("a permissions boundary")
         if r.get("decision") == "explicitDeny":
             blockers.append("an explicit Deny")
+    if not blockers and resources != ["*"]:
+        # An implicit deny against a resource-scoped grant can mean the
+        # simulator compared the action with a resource the grant does not
+        # name, not that the grant is gone. Without an SCP, boundary or explicit
+        # Deny to point at, that is "could not confirm", not "refuted".
+        return VerdictStatus.UNVERIFIABLE, (
+            f"AWS's policy simulator implicitly denies {', '.join(denied)} for '{name}' "
+            f"when evaluated against {', '.join(resources)}, and names no SCP, boundary or "
+            f"explicit Deny. The grant is resource-scoped, so this cannot be confirmed "
+            f"either way."
+        ), evidence
     why = f" ({', '.join(sorted(set(blockers)))})" if blockers else ""
     return VerdictStatus.REFUTED, (
         f"The policy grants it on paper, but AWS's policy simulator denies "
@@ -584,7 +595,17 @@ def _verify_self_escalation(
         f"AdministratorAccess. The grant was verified; nothing was attached or changed.",
         calls,
     )
-    return _apply_simulation(static, _simulate(source, kind, name, primitives, need="any"))
+    # Simulate against the resources the grants actually name. Simulating a
+    # grant scoped to arn:aws:iam::*:policy/app-* against "*" reports an
+    # implicit deny that says nothing about the grant.
+    account = parse_node(node)[0]
+    scoped = sorted({
+        r.replace("::*:", f"::{account}:") if account else r
+        for a in primitives
+        for r in policy.granted_resources(statements, a)
+    })
+    resources = None if (not scoped or "*" in scoped) else scoped
+    return _apply_simulation(static, _simulate(source, kind, name, primitives, resources, need="any"))
 
 
 def _verify_cross_account_trust(
@@ -616,7 +637,7 @@ def _verify_cross_account_trust(
     if not principals:
         return (
             VerdictStatus.REFUTED,
-            f"Role '{role}' in {role_account} no longer trusts any external IAM principal.",
+            f"Role '{role}' in {role_account} no longer trusts any named IAM principal.",
             calls,
         )
 
@@ -631,6 +652,15 @@ def _verify_cross_account_trust(
             calls,
         )
 
+    if src_account == role_account:
+        return (
+            VerdictStatus.CONFIRMED,
+            (
+                f"The trust policy on '{role}' explicitly names {matched[0]}, which within "
+                f"the same account is enough for '{src_name}' to assume it. No role was assumed."
+            ),
+            calls,
+        )
     return (
         VerdictStatus.CONFIRMED,
         (
@@ -727,6 +757,7 @@ _CLAIMS = {
     "can_pass_role_to": "{src} can pass the role {tgt} into new compute and run code as it",
     "can_pass_role_to (wildcard)": "{src} holds unscoped iam:PassRole and can pass any role, including {tgt}",
     "can_assume_cross_account": "{src} is named in the trust policy of {tgt} and can cross the account boundary",
+    "can_assume_role": "{src} is named in the trust policy of {tgt} and can assume it",
     "can_escalate_to_admin": "{src} can grant itself AdministratorAccess through IAM write permissions",
     "grants_admin_access": "{src} is granted AdministratorAccess",
     "has_admin_policy": "{src} directly holds an unrestricted (*:*) policy",
@@ -751,7 +782,7 @@ def _index_sources(sources: Sources) -> Tuple[Dict[str, AWSDataSource], Optional
     """
     if isinstance(sources, Mapping):
         by_account = dict(sources)
-    elif isinstance(sources, AWSDataSource):
+    elif isinstance(sources, (AWSDataSource, _MemoSource)):
         by_account = {sources.account_id: sources}
     else:
         by_account = {s.account_id: s for s in sources}
@@ -787,7 +818,7 @@ def validate_path(
 
         # The trust-policy check belongs to the account owning the *target*
         # role; every other check belongs to the source resource's account.
-        owner = tgt if relation == "can_assume_cross_account" else src
+        owner = tgt if relation in ("can_assume_cross_account", "can_assume_role") else src
         source = source_for(owner)
 
         if source is None:
@@ -803,7 +834,7 @@ def validate_path(
             status, reason, calls = _verify_pass_role(source, src, tgt_name)
         elif relation == "can_escalate_to_admin":
             status, reason, calls = _verify_self_escalation(source, src)
-        elif relation == "can_assume_cross_account":
+        elif relation in ("can_assume_cross_account", "can_assume_role"):
             status, reason, calls = _verify_cross_account_trust(source, src, tgt)
         elif relation in ("grants_admin_access", "has_admin_policy"):
             status, reason, calls = _verify_admin_grant(source, src)
@@ -873,9 +904,49 @@ def validate_path(
     )
 
 
+class _MemoSource:
+    """Caches read-only data-source calls for the length of one validation run.
+
+    Routes share hops: on a real account the same identity's policies, the
+    same trust policy and the same simulator question come up dozens of times.
+    Answering each once turns a run of hundreds of routes from tens of minutes
+    into minutes. Only methods in READ_ONLY_METHODS are reachable through the
+    wrapper, so the safety allowlist still holds.
+    """
+
+    def __init__(self, source: AWSDataSource):
+        self._source = source
+        self._cache: Dict[Any, Any] = {}
+        self.account_id = source.account_id
+        self.account_name = getattr(source, "account_name", "")
+
+    @staticmethod
+    def _key(value: Any) -> Any:
+        if isinstance(value, (list, tuple)):
+            return tuple(_MemoSource._key(v) for v in value)
+        if isinstance(value, dict):
+            return tuple(sorted((k, _MemoSource._key(v)) for k, v in value.items()))
+        return value
+
+    def __getattr__(self, name: str):
+        if name not in READ_ONLY_METHODS:
+            raise AttributeError(f"validation may not call {name!r}")
+        method = getattr(self._source, name)
+
+        def cached(*args, **kwargs):
+            key = (name, self._key(args), self._key(kwargs))
+            if key not in self._cache:
+                self._cache[key] = method(*args, **kwargs)
+            return self._cache[key]
+
+        return cached
+
+
 def validate_paths(
     paths: Sequence[AttackPath],
     sources: Sources,
     graph: Optional[ScanGraph] = None,
 ) -> List[PathValidation]:
-    return [validate_path(p, sources, graph) for p in paths]
+    by_account, _ = _index_sources(sources)
+    memo = {acct: _MemoSource(src) for acct, src in by_account.items()}
+    return [validate_path(p, memo, graph) for p in paths]

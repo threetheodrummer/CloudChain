@@ -89,8 +89,13 @@ def test_policy_documents_flatten_from_both_dict_and_json_string():
 
 
 def test_deny_statements_are_never_treated_as_grants():
+    from app.scanners import policy
+
     doc = {"Statement": [{"Effect": "Deny", "Action": "*", "Resource": "*"}]}
-    assert _flatten_policy_document(doc) == []
+    flat = _flatten_policy_document(doc)
+    # Kept, but marked, so it can subtract from allows instead of adding to them.
+    assert all(a.startswith("DENY:") for a, _ in flat)
+    assert not policy.grants(flat, "iam:CreateUser")
 
 
 # ------------------------------------------- 2. AWS service-managed roles

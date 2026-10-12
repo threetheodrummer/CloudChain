@@ -42,11 +42,27 @@ def _flatten_policy_document(document: Any) -> List[Tuple[str, str]]:
 
     pairs: List[Tuple[str, str]] = []
     for stmt in _as_list(document.get("Statement")):
-        if not isinstance(stmt, dict) or stmt.get("Effect") != "Allow":
+        if not isinstance(stmt, dict):
             continue
-        for action in _as_list(stmt.get("Action")):
-            for resource in _as_list(stmt.get("Resource")) or ["*"]:
-                pairs.append((action, resource))
+        effect = stmt.get("Effect")
+        resources = _as_list(stmt.get("Resource")) or ["*"]
+        if effect == "Allow":
+            for action in _as_list(stmt.get("Action")):
+                for resource in resources:
+                    pairs.append((action, resource))
+            # NotAction + Allow grants everything *except* the listed actions.
+            # Encoded so scanners/policy.py can evaluate it; see NOT_PREFIX.
+            not_actions = _as_list(stmt.get("NotAction"))
+            if not_actions:
+                for resource in resources:
+                    pairs.append(("NOT:" + "|".join(not_actions), resource))
+        elif effect == "Deny" and not stmt.get("Condition"):
+            # Unconditional explicit denies. A conditional Deny may or may not
+            # apply to a given request, so it is left to the policy simulator
+            # rather than guessed at here.
+            for action in _as_list(stmt.get("Action")):
+                for resource in resources:
+                    pairs.append(("DENY:" + action, resource))
     return pairs
 
 
@@ -132,6 +148,11 @@ class AWSDataSource(ABC):
 
     @abstractmethod
     def user_has_mfa(self, user: str) -> bool: ...
+
+    def has_console_password(self, user: str) -> bool:
+        """Whether the user can sign in to the console. Defaults to True so a
+        source that can't tell keeps the MFA check on."""
+        return True
 
     @abstractmethod
     def list_access_keys(self, user: str) -> List[Dict[str, Any]]: ...
@@ -541,6 +562,17 @@ class RealAWSDataSource(AWSDataSource):
 
         return self._safe(call, False)
 
+    def has_console_password(self, user: str) -> bool:
+        try:
+            self._iam.get_login_profile(UserName=user)
+            return True
+        except Exception as exc:  # NoSuchEntity means key-only
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+            if code == "NoSuchEntity":
+                return False
+            logger.warning("AWS call failed, assuming console access: %s", exc)
+            return True
+
     def list_access_keys(self, user: str) -> List[Dict[str, Any]]:
         def call():
             resp = self._iam.list_access_keys(UserName=user)
@@ -677,6 +709,42 @@ class RealAWSDataSource(AWSDataSource):
             if doc:
                 pairs.extend(_flatten_policy_document(doc))
 
+        if is_user:
+            pairs.extend(self._group_policy_statements(name))
+        return pairs
+
+    def _group_policy_statements(self, user: str) -> List[Tuple[str, str]]:
+        """Permissions a user inherits from its IAM groups.
+
+        Without this a user whose escalation primitive lives on a group policy
+        looks clean. Attached and inline group policies are both read.
+        """
+        def groups():
+            out: List[str] = []
+            paginator = self._iam.get_paginator("list_groups_for_user")
+            for page in paginator.paginate(UserName=user):
+                out.extend(g["GroupName"] for g in page.get("Groups", []))
+            return out
+
+        pairs: List[Tuple[str, str]] = []
+        for group in self._safe(groups, []):
+            def attached(group=group):
+                resp = self._iam.list_attached_group_policies(GroupName=group)
+                return [p["PolicyArn"] for p in resp.get("AttachedPolicies", [])]
+
+            for arn in self._safe(attached, []):
+                pairs.extend(self._statements_from_policy_arn(arn))
+
+            def inline(group=group):
+                return self._iam.list_group_policies(GroupName=group).get("PolicyNames", [])
+
+            for pname in self._safe(inline, []):
+                def document(group=group, pname=pname):
+                    return self._iam.get_group_policy(GroupName=group, PolicyName=pname)["PolicyDocument"]
+
+                doc = self._safe(document, None)
+                if doc:
+                    pairs.extend(_flatten_policy_document(doc))
         return pairs
 
     def _statements_from_policy_arn(self, arn: str) -> List[Tuple[str, str]]:
@@ -704,19 +772,7 @@ class RealAWSDataSource(AWSDataSource):
             pol = self._iam.get_policy(PolicyArn=arn)["Policy"]
             version_id = pol["DefaultVersionId"]
             doc = self._iam.get_policy_version(PolicyArn=arn, VersionId=version_id)
-            statement = doc["PolicyVersion"]["Document"].get("Statement", [])
-            pairs = []
-            for stmt in statement if isinstance(statement, list) else [statement]:
-                if stmt.get("Effect") != "Allow":
-                    continue
-                actions = stmt.get("Action", [])
-                actions = [actions] if isinstance(actions, str) else actions
-                resources = stmt.get("Resource", [])
-                resources = [resources] if isinstance(resources, str) else resources
-                for a in actions:
-                    for r in resources or ["*"]:
-                        pairs.append((a, r))
-            return pairs
+            return _flatten_policy_document(doc["PolicyVersion"]["Document"])
 
         return self._safe(call, [])
 

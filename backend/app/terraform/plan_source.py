@@ -43,7 +43,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from app.sources import AWSDataSource
+from app.sources import AWSDataSource, _flatten_policy_document
 
 PUBLIC_ACLS = {"public-read", "public-read-write", "authenticated-read"}
 
@@ -82,30 +82,9 @@ def _values(resource: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _policy_statements(document: Any) -> List[Tuple[str, str]]:
-    """Flatten an IAM policy document into (action, resource) Allow pairs."""
-    if isinstance(document, str):
-        try:
-            document = json.loads(document)
-        except (ValueError, TypeError):
-            return []
-    if not isinstance(document, dict):
-        return []
-
-    statements = document.get("Statement", [])
-    statements = statements if isinstance(statements, list) else [statements]
-
-    pairs: List[Tuple[str, str]] = []
-    for stmt in statements:
-        if not isinstance(stmt, dict) or stmt.get("Effect") != "Allow":
-            continue
-        actions = stmt.get("Action", [])
-        actions = [actions] if isinstance(actions, str) else actions
-        resources = stmt.get("Resource", [])
-        resources = [resources] if isinstance(resources, str) else resources
-        for action in actions:
-            for res in resources or ["*"]:
-                pairs.append((action, res))
-    return pairs
+    """Flatten an IAM policy document. Shared with the live source so a plan
+    and a deployed account are read with identical semantics."""
+    return _flatten_policy_document(document)
 
 
 def _trust_principals(document: Any) -> List[str]:
