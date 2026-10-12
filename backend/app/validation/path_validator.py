@@ -40,7 +40,8 @@ data source breaks the build.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from fnmatch import fnmatchcase
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from app.graph.attack_graph import is_admin_sink, parse_node
 from app.models import (
@@ -51,7 +52,8 @@ from app.models import (
     ScanGraph,
     VerdictStatus,
 )
-from app.scanners.iam_scanner import COMPUTE_CREATE_ACTIONS
+from app.scanners import policy
+from app.scanners.iam_scanner import COMPUTE_CREATE_ACTIONS, _extract_role_name
 from app.scanners.s3_scanner import CREDENTIAL_KEY_PATTERNS
 from app.sources import AWSDataSource
 
@@ -68,6 +70,10 @@ READ_ONLY_METHODS = frozenset(
         "list_role_policy_names",
         "list_role_trust_principals",
         "get_policy_statements",
+        "get_identity_policy_statements",
+        "list_access_keys",
+        "principal_arn",
+        "simulate_principal_policy",
     }
 )
 
@@ -85,8 +91,148 @@ def _statements(source: AWSDataSource, policy_names: Sequence[str]) -> List[Tupl
     return pairs
 
 
-def _is_wildcard(action: str, resource: str) -> bool:
-    return action in ("*", "*:*") and resource == "*"
+def _identity_statements(source: AWSDataSource, kind: str, name: str) -> List[Tuple[str, str]]:
+    """Everything a user or role is granted: attached AWS-managed,
+    customer-managed and inline policies.
+
+    Validation used to resolve policies by *name* only, which on a real account
+    sees AWS-managed policies and nothing else. The scanner already used the
+    full resolution, so a path the scanner found from an inline policy came
+    back UNVERIFIABLE (or worse, REFUTED) here. Both now read the same thing.
+    """
+    return source.get_identity_policy_statements("user" if kind == "iam_user" else "role", name)
+
+
+def _identity_type(kind: str) -> str:
+    return "user" if kind == "iam_user" else "role"
+
+
+def _role_matches(pattern: str, role: str) -> bool:
+    """Does a PassRole resource pattern cover this role name?
+
+    Patterns are ARNs with optional wildcards and an optional path, e.g.
+    arn:aws:iam::111111111111:role/service-role/Lambda*. Only the part after
+    the last '/' names the role; wildcards in it are honoured.
+    """
+    if pattern == "*":
+        return True
+    tail = _extract_role_name(pattern)
+    return fnmatchcase(role, tail) or pattern == role
+
+
+# --------------------------------------------------------------------------
+# AWS policy simulator -- a second opinion from AWS itself
+# --------------------------------------------------------------------------
+
+
+def _simulate(
+    source: AWSDataSource,
+    kind: str,
+    name: str,
+    actions: Sequence[str],
+    resource_arns: Optional[Sequence[str]] = None,
+    need: str = "all",
+) -> Tuple[Optional[VerdictStatus], Optional[str], Optional[EvidenceCall]]:
+    """Ask iam:SimulatePrincipalPolicy whether the hop's actions are allowed.
+
+    CloudChain's static analysis does not model explicit Deny, permissions
+    boundaries, SCPs or conditions. The simulator does. So after a static check
+    confirms a hop, this can overturn it: if AWS says the needed actions are
+    denied, the hop is REFUTED and the reason says which layer blocked it.
+
+    need="all": every action must be allowed. need="any": at least one.
+
+    Returns (override, reason, evidence). override is None when the simulator
+    agrees, isn't available (demo, Terraform plan), or can't decide because a
+    condition needs request context it doesn't have. Missing information never
+    becomes a verdict.
+    """
+    arn = source.principal_arn(_identity_type(kind), name)
+    if not arn:
+        return None, None, None
+
+    resources = list(resource_arns or ["*"])
+    cli = (
+        f"aws iam simulate-principal-policy --policy-source-arn {arn} "
+        f"--action-names {' '.join(actions)} --resource-arns {' '.join(resources)}"
+    )
+    results = source.simulate_principal_policy(arn, actions, resources)
+    if results is None:
+        return None, None, EvidenceCall(
+            api="iam:SimulatePrincipalPolicy",
+            request=f"PolicySourceArn={arn}",
+            observed="simulator unavailable (no permission, or call failed); static verdict kept",
+            cli=cli,
+        )
+
+    def describe(action: str, r: Dict[str, Any]) -> str:
+        bits = [r.get("decision") or "unknown"]
+        if r.get("allowed_by_boundary") is False:
+            bits.append("blocked by permissions boundary")
+        if r.get("allowed_by_organizations") is False:
+            bits.append("blocked by SCP")
+        if r.get("missing_context"):
+            bits.append("needs context: " + ", ".join(r["missing_context"]))
+        return f"{action}: {'; '.join(bits)}"
+
+    observed = "; ".join(describe(a, results.get(a, {})) for a in actions)
+    evidence = EvidenceCall(
+        api="iam:SimulatePrincipalPolicy",
+        request=f"PolicySourceArn={arn}, ResourceArns={', '.join(resources)}",
+        observed=observed,
+        cli=cli,
+    )
+
+    allowed = [a for a in actions if results.get(a, {}).get("decision") == "allowed"]
+    undecidable = [
+        a for a in actions
+        if a not in allowed and results.get(a, {}).get("missing_context")
+    ]
+    denied = [a for a in actions if a not in allowed and a not in undecidable]
+
+    satisfied = (len(allowed) == len(actions)) if need == "all" else bool(allowed)
+    if satisfied:
+        return None, None, evidence
+    if undecidable:
+        # A condition key the simulator had no value for. That is "we don't
+        # know", not "denied".
+        return VerdictStatus.UNVERIFIABLE, (
+            f"AWS's policy simulator could not decide {', '.join(undecidable)} for '{name}' "
+            f"without request context ({', '.join(results[undecidable[0]]['missing_context'])})."
+        ), evidence
+
+    blockers = []
+    for a in denied:
+        r = results.get(a, {})
+        if r.get("allowed_by_organizations") is False:
+            blockers.append("a service control policy")
+        if r.get("allowed_by_boundary") is False:
+            blockers.append("a permissions boundary")
+        if r.get("decision") == "explicitDeny":
+            blockers.append("an explicit Deny")
+    why = f" ({', '.join(sorted(set(blockers)))})" if blockers else ""
+    return VerdictStatus.REFUTED, (
+        f"The policy grants it on paper, but AWS's policy simulator denies "
+        f"{', '.join(denied)} for '{name}'{why}. The hop cannot be walked."
+    ), evidence
+
+
+def _apply_simulation(
+    verdict: Tuple[VerdictStatus, str, List[EvidenceCall]],
+    simulation: Tuple[Optional[VerdictStatus], Optional[str], Optional[EvidenceCall]],
+) -> Tuple[VerdictStatus, str, List[EvidenceCall]]:
+    """Fold a simulator result into a static verdict. Only a CONFIRMED static
+    verdict can be overturned; a static REFUTED or UNVERIFIABLE stands."""
+    status, reason, calls = verdict
+    override, sim_reason, evidence = simulation
+    if evidence is not None:
+        calls = calls + [evidence]
+    if status is VerdictStatus.CONFIRMED and override is not None:
+        return override, sim_reason or reason, calls
+    if status is VerdictStatus.CONFIRMED and evidence is not None and override is None and \
+            "unavailable" not in evidence.observed:
+        reason = reason + " AWS's policy simulator agrees."
+    return status, reason, calls
 
 
 # --------------------------------------------------------------------------
@@ -161,92 +307,195 @@ def _verify_leaked_credentials(
             calls,
         )
 
+    # A leaked key only matters while it still works. If every access key the
+    # user has is deactivated, the leak is real but the hop is closed.
+    keys = source.list_access_keys(user)
+    active = [k for k in keys if str(k.get("status", "")).lower() == "active"]
+    calls.append(
+        EvidenceCall(
+            api="iam:ListAccessKeys",
+            request=f"UserName={user}",
+            observed=(
+                f"{len(keys)} access key(s), {len(active)} active"
+                if keys else "no access keys visible"
+            ),
+            cli=f"aws iam list-access-keys --user-name {user}",
+        )
+    )
+    if keys and not active:
+        return (
+            VerdictStatus.REFUTED,
+            f"Every access key belonging to '{user}' is inactive, so a leaked key can no "
+            f"longer be used.",
+            calls,
+        )
+    if not keys:
+        return (
+            VerdictStatus.UNVERIFIABLE,
+            f"Bucket '{bucket}' still exposes credential-shaped keys, but no access keys "
+            f"are visible for '{user}' (none exist, or ListAccessKeys was denied), so "
+            f"whether the leak is still usable could not be checked.",
+            calls,
+        )
+
     return (
         VerdictStatus.CONFIRMED,
         (
             f"Bucket '{bucket}' is publicly readable and exposes {len(matched)} "
             f"credential-shaped key ({', '.join(matched)}), which the graph attributes "
-            f"to '{user}'. Object contents were not read."
+            f"to '{user}', who still has {len(active)} active access key(s). Object "
+            f"contents were not read during validation."
         ),
         calls,
     )
 
 
 def _verify_pass_role(
-    source: AWSDataSource, user: str, role: str
+    source: AWSDataSource, src_node: str, role: str
 ) -> Tuple[VerdictStatus, str, List[EvidenceCall]]:
-    """IAM user -> IAM role: PassRole plus a compute-creation action."""
+    """User or role -> IAM role: PassRole plus a compute-creation action.
+
+    Uses the same wildcard-aware matching as the scanner. Comparing action
+    strings exactly meant a principal granted iam:* or iam:Pass* came back as
+    "no longer holds iam:PassRole" -- a false REFUTED on exactly the
+    over-broad grants that matter most.
+    """
+    account, kind, name = parse_node(src_node)
     calls: List[EvidenceCall] = []
 
-    policy_names = source.list_user_policy_names(user)
+    statements = _identity_statements(source, kind, name)
+    list_api = "iam:ListAttachedUserPolicies" if kind == "iam_user" else "iam:ListAttachedRolePolicies"
+    list_cli = (
+        f"aws iam list-attached-user-policies --user-name {name}"
+        if kind == "iam_user"
+        else f"aws iam list-attached-role-policies --role-name {name}"
+    )
     calls.append(
         EvidenceCall(
-            api="iam:ListAttachedUserPolicies",
-            request=f"UserName={user}",
-            observed=f"{len(policy_names)} policy/policies: {', '.join(policy_names) or 'none'}",
-            cli=f"aws iam list-attached-user-policies --user-name {user}",
+            api=list_api,
+            request=f"name={name}",
+            observed=f"{len(statements)} allow statement(s) across attached and inline policies",
+            cli=list_cli + "  # plus list-*-policies for inline policies",
         )
     )
 
-    statements = _statements(source, policy_names)
     if not statements:
         return (
             VerdictStatus.UNVERIFIABLE,
-            f"Could not resolve the policy documents attached to '{user}', so the "
+            f"Could not resolve the policy documents attached to '{name}', so the "
             f"PassRole grant could not be re-checked.",
             calls,
         )
 
-    actions = {a for a, _ in statements}
-    pass_targets = [r for a, r in statements if a == "iam:PassRole"]
-    compute = sorted(actions & COMPUTE_CREATE_ACTIONS)
+    pass_targets = policy.granted_resources(statements, "iam:PassRole")
+    compute = sorted(a for a in COMPUTE_CREATE_ACTIONS if policy.grants(statements, a))
 
     calls.append(
         EvidenceCall(
             api="iam:GetPolicyVersion",
-            request=f"policies={', '.join(policy_names)}",
+            request=f"identity={name}",
             observed=(
                 f"iam:PassRole -> {', '.join(pass_targets) if pass_targets else 'not granted'}; "
                 f"compute actions: {', '.join(compute) if compute else 'none'}"
             ),
-            cli=f"aws iam list-attached-user-policies --user-name {user}  "
-            f"# then get-policy-version for each",
+            cli="aws iam get-policy-version --policy-arn <arn> --version-id <v>",
         )
     )
 
     if not pass_targets:
-        return (
-            VerdictStatus.REFUTED,
-            f"'{user}' no longer holds iam:PassRole.",
-            calls,
-        )
+        return (VerdictStatus.REFUTED, f"'{name}' no longer holds iam:PassRole.", calls)
     if not compute:
         return (
             VerdictStatus.REFUTED,
-            f"'{user}' holds iam:PassRole but no compute-creation action, so it cannot "
+            f"'{name}' holds iam:PassRole but no compute-creation action, so it cannot "
             f"launch anything to run as '{role}'.",
             calls,
         )
-
-    scoped = any(t == "*" or t.endswith(f"/{role}") or t == role for t in pass_targets)
-    if not scoped:
+    if not any(_role_matches(t, role) for t in pass_targets):
         return (
             VerdictStatus.REFUTED,
-            f"'{user}' can pass roles, but '{role}' is not among the permitted targets "
+            f"'{name}' can pass roles, but '{role}' is not among the permitted targets "
             f"({', '.join(pass_targets)}).",
             calls,
         )
 
-    wildcard = "*" in pass_targets
-    return (
+    wildcard = any(t == "*" for t in pass_targets)
+    static = (
         VerdictStatus.CONFIRMED,
         (
-            f"'{user}' holds iam:PassRole ({'unscoped' if wildcard else 'scoped to ' + role}) "
+            f"'{name}' holds iam:PassRole ({'unscoped' if wildcard else 'covering ' + role}) "
             f"together with {', '.join(compute)}. The grant was verified; no function or "
             f"instance was created."
         ),
         calls,
     )
+
+    role_arn = source.principal_arn("role", role)
+    pass_check = _simulate(source, kind, name, ["iam:PassRole"], [role_arn] if role_arn else None)
+    verdict = _apply_simulation(static, pass_check)
+    if verdict[0] is not VerdictStatus.CONFIRMED:
+        return verdict
+    return _apply_simulation(verdict, _simulate(source, kind, name, compute, need="any"))
+
+
+def _verify_self_escalation(
+    source: AWSDataSource, node: str
+) -> Tuple[VerdictStatus, str, List[EvidenceCall]]:
+    """Identity -> AdministratorAccess via IAM write permissions.
+
+    The graph emits can_escalate_to_admin for identities that can grant
+    themselves admin (attach a policy, publish a policy version, ...). There
+    was previously no verifier for it, so every escalation route came back
+    UNVERIFIABLE regardless of the account's actual state.
+    """
+    _, kind, name = parse_node(node)
+    calls: List[EvidenceCall] = []
+    statements = _identity_statements(source, kind, name)
+    calls.append(
+        EvidenceCall(
+            api="iam:GetPolicyVersion",
+            request=f"identity={name}",
+            observed=f"{len(statements)} allow statement(s) across attached and inline policies",
+            cli=(
+                f"aws iam list-attached-{'user' if kind == 'iam_user' else 'role'}-policies "
+                f"--{'user' if kind == 'iam_user' else 'role'}-name {name}"
+            ),
+        )
+    )
+    if not statements:
+        return (
+            VerdictStatus.UNVERIFIABLE,
+            f"Could not resolve the policy documents attached to '{name}'.",
+            calls,
+        )
+
+    primitives = [a for a, _ in policy.find_escalation_primitives(statements)]
+    calls.append(
+        EvidenceCall(
+            api="iam:GetPolicyVersion",
+            request=f"identity={name}",
+            observed=(
+                "escalation primitives granted: " + ", ".join(primitives)
+                if primitives else "no self-escalation primitive granted"
+            ),
+            cli="aws iam get-policy-version --policy-arn <arn> --version-id <v>",
+        )
+    )
+    if not primitives:
+        return (
+            VerdictStatus.REFUTED,
+            f"'{name}' no longer holds any IAM write permission that would let it grant "
+            f"itself administrator access.",
+            calls,
+        )
+
+    static = (
+        VerdictStatus.CONFIRMED,
+        f"'{name}' holds {', '.join(primitives)}, any one of which lets it grant itself "
+        f"AdministratorAccess. The grant was verified; nothing was attached or changed.",
+        calls,
+    )
+    return _apply_simulation(static, _simulate(source, kind, name, primitives, need="any"))
 
 
 def _verify_cross_account_trust(
@@ -307,27 +556,30 @@ def _verify_cross_account_trust(
 def _verify_admin_grant(
     source: AWSDataSource, node: str
 ) -> Tuple[VerdictStatus, str, List[EvidenceCall]]:
-    """Role or user -> AdministratorAccess: an unrestricted (*:*) statement."""
-    kind, name = _split_node(node)
+    """Role or user -> AdministratorAccess.
+
+    Uses the scanner's own definition of admin (policy.is_admin_equivalent:
+    *:* on *, or iam:* on *), so a path the scanner drew is checked against the
+    same rule rather than a stricter one that would refute it on sight.
+    """
+    _, kind, name = parse_node(node)
     calls: List[EvidenceCall] = []
 
+    statements = _identity_statements(source, kind, name)
     if kind == "iam_role":
-        policy_names = source.list_role_policy_names(name)
         api, cli = "iam:ListAttachedRolePolicies", f"aws iam list-attached-role-policies --role-name {name}"
     else:
-        policy_names = source.list_user_policy_names(name)
         api, cli = "iam:ListAttachedUserPolicies", f"aws iam list-attached-user-policies --user-name {name}"
 
     calls.append(
         EvidenceCall(
             api=api,
             request=f"name={name}",
-            observed=f"{len(policy_names)} policy/policies: {', '.join(policy_names) or 'none'}",
+            observed=f"{len(statements)} allow statement(s) across attached and inline policies",
             cli=cli,
         )
     )
 
-    statements = _statements(source, policy_names)
     if not statements:
         return (
             VerdictStatus.UNVERIFIABLE,
@@ -335,33 +587,41 @@ def _verify_admin_grant(
             calls,
         )
 
-    wildcards = [(a, r) for a, r in statements if _is_wildcard(a, r)]
+    full = policy.is_full_admin(statements)
+    equivalent = policy.is_admin_equivalent(statements)
     calls.append(
         EvidenceCall(
             api="iam:GetPolicyVersion",
-            request=f"policies={', '.join(policy_names)}",
+            request=f"identity={name}",
             observed=(
-                f"unrestricted statement found: {wildcards[0][0]} on {wildcards[0][1]}"
-                if wildcards
-                else "no unrestricted (*:*) statement"
+                "unrestricted statement (every action on every resource)" if full
+                else "full IAM control on * (admin-equivalent)" if equivalent
+                else "no unrestricted or full-IAM statement"
             ),
-            cli=f"aws iam get-policy-version --policy-arn <arn> --version-id <v>",
+            cli="aws iam get-policy-version --policy-arn <arn> --version-id <v>",
         )
     )
 
-    if not wildcards:
+    if not equivalent:
         return (
             VerdictStatus.REFUTED,
-            f"'{name}' no longer carries an unrestricted (*:*) policy.",
+            f"'{name}' no longer carries an unrestricted (*:*) or full-IAM policy.",
             calls,
         )
 
-    return (
+    static = (
         VerdictStatus.CONFIRMED,
-        f"'{name}' carries an unrestricted statement (Action {wildcards[0][0]} on "
-        f"Resource {wildcards[0][1]}), which is AdministratorAccess in effect.",
+        (
+            f"'{name}' carries an unrestricted statement, which is AdministratorAccess in effect."
+            if full
+            else f"'{name}' holds full control of IAM on every resource, which is one "
+            f"API call away from AdministratorAccess."
+        ),
         calls,
     )
+    # Probe actions any administrator (or IAM-admin) can perform.
+    probes = ["iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:CreatePolicyVersion"]
+    return _apply_simulation(static, _simulate(source, kind, name, probes, need="any"))
 
 
 # --------------------------------------------------------------------------
@@ -373,6 +633,7 @@ _CLAIMS = {
     "can_pass_role_to": "{src} can pass the role {tgt} into new compute and run code as it",
     "can_pass_role_to (wildcard)": "{src} holds unscoped iam:PassRole and can pass any role, including {tgt}",
     "can_assume_cross_account": "{src} is named in the trust policy of {tgt} and can cross the account boundary",
+    "can_escalate_to_admin": "{src} can grant itself AdministratorAccess through IAM write permissions",
     "grants_admin_access": "{src} is granted AdministratorAccess",
     "has_admin_policy": "{src} directly holds an unrestricted (*:*) policy",
 }
@@ -445,7 +706,9 @@ def validate_path(
         elif relation == "leaks_credentials_for":
             status, reason, calls = _verify_leaked_credentials(source, src_name, tgt_name)
         elif relation.startswith("can_pass_role_to"):
-            status, reason, calls = _verify_pass_role(source, src_name, tgt_name)
+            status, reason, calls = _verify_pass_role(source, src, tgt_name)
+        elif relation == "can_escalate_to_admin":
+            status, reason, calls = _verify_self_escalation(source, src)
         elif relation == "can_assume_cross_account":
             status, reason, calls = _verify_cross_account_trust(source, src, tgt)
         elif relation in ("grants_admin_access", "has_admin_policy"):

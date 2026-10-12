@@ -14,6 +14,7 @@ const SHORT_RELATION = {
   can_pass_role_to: 'can pass role to',
   'can_pass_role_to (wildcard)': 'can pass any role to',
   can_assume_cross_account: 'can assume via sts:AssumeRole',
+  can_escalate_to_admin: 'can grant itself',
   grants_admin_access: 'grants',
   has_admin_policy: 'holds admin policy'
 };

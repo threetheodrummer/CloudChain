@@ -52,6 +52,7 @@ def analyse_sources(
     scan_id: str,
     mode: str,
     stage: Optional[Callable[[str, str], None]] = None,
+    max_hops: Optional[int] = None,
 ) -> ScanResult:
     """Scanners -> graph -> scoring, for any set of data sources.
 
@@ -92,14 +93,14 @@ def analyse_sources(
 
     step("graph", f"{len(findings)} findings across {len(sources)} account(s)")
     graph, findings_by_resource = build_attack_graph(findings)
-    attack_paths = find_attack_paths(graph, findings_by_resource)
+    attack_paths = find_attack_paths(graph, findings_by_resource, max_hops=max_hops)
 
     # Identity-to-admin routes are computed for every scan, not just for
     # Terraform plan checking. Most real accounts have no internet entry point
     # at all, so reporting only internet-reachable chains means reporting
     # nothing -- which is exactly what happened the first time CloudChain was
     # pointed at a deliberately vulnerable account.
-    escalation_paths = find_escalation_paths(graph, findings_by_resource)
+    escalation_paths = find_escalation_paths(graph, findings_by_resource, max_hops=max_hops)
 
     # Only internet-reachable chains boost a finding's risk score. An
     # escalation primitive is real but conditional, and the 2.5x multiplier is
@@ -132,6 +133,8 @@ def run_scan(
     secret_access_key: Optional[str] = None,
     session_token: Optional[str] = None,
     stage_delay: float = 0.0,
+    inspect_credential_objects: Optional[bool] = None,
+    max_hops: Optional[int] = None,
 ) -> Tuple[ScanResult, DriftReport]:
     """Run one full scan.
 
@@ -156,8 +159,9 @@ def run_scan(
         access_key_id=access_key_id,
         secret_access_key=secret_access_key,
         session_token=session_token,
+        inspect_credential_objects=inspect_credential_objects,
     )
-    result = analyse_sources(sources, scan_id=scan_id, mode=mode, stage=stage)
+    result = analyse_sources(sources, scan_id=scan_id, mode=mode, stage=stage, max_hops=max_hops)
 
     stage("drift", "diffing against previous snapshot")
     previous = get_previous_scan(scan_id, mode) if persist else None

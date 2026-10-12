@@ -106,6 +106,26 @@ class AWSDataSource(ABC):
         (see s3_scanner.CREDENTIAL_KEY_PATTERNS)."""
         return None
 
+    def read_object_head(self, bucket: str, key: str, max_bytes: int = 65536) -> Optional[bytes]:
+        """The first max_bytes of an object, or None if this source can't or
+        won't read it.
+
+        Only ever called by the S3 scanner, only for credential-shaped keys in
+        public buckets, and only when the operator opts in
+        (CLOUDCHAIN_INSPECT_CREDENTIAL_OBJECTS / --inspect-credential-objects).
+        Validation never calls it: it is deliberately absent from
+        READ_ONLY_METHODS. The default reads nothing.
+        """
+        return None
+
+    def access_key_account(self, access_key_id: str) -> Optional[str]:
+        """Which AWS account owns an access key ID (sts:GetAccessKeyInfo).
+
+        Lets the scanner say "this leaked key belongs to account X, which is
+        outside the scan" instead of just "no match". Never uses the key.
+        """
+        return None
+
     # --- IAM ---
     @abstractmethod
     def list_iam_users(self) -> List[str]: ...
@@ -180,6 +200,32 @@ class AWSDataSource(ABC):
         for policy_name in names:
             pairs.extend(self.get_policy_statements(policy_name))
         return pairs
+
+    def principal_arn(self, identity_type: str, name: str) -> Optional[str]:
+        """Full ARN (including path) of a user or role, or None if unknown.
+
+        identity_type is "user" or "role". Needed by the policy simulator,
+        which takes an ARN rather than a name.
+        """
+        return None
+
+    def simulate_principal_policy(
+        self,
+        principal_arn: str,
+        actions: Sequence[str],
+        resource_arns: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Ask AWS's own policy evaluator whether a principal may call actions.
+
+        Returns {action: {"decision", "allowed_by_boundary",
+        "allowed_by_organizations", "missing_context"}} or None when the source
+        has no simulator (demo, Terraform plan) or the call was denied.
+
+        iam:SimulatePrincipalPolicy evaluates identity policies, permissions
+        boundaries and SCPs, which CloudChain's own static analysis does not
+        model. It is an authorisation check only; nothing is executed.
+        """
+        return None
 
     @abstractmethod
     def get_account_password_policy(self) -> Dict[str, Any]: ...
@@ -334,8 +380,18 @@ class RealAWSDataSource(AWSDataSource):
         access_key_id: Optional[str] = None,
         secret_access_key: Optional[str] = None,
         session_token: Optional[str] = None,
+        inspect_credential_objects: Optional[bool] = None,
     ):
         import boto3
+
+        from app.config import settings
+
+        # Opt-in object inspection (see app/scanners/credential_match.py).
+        self.inspect_credential_objects = (
+            settings.inspect_credential_objects
+            if inspect_credential_objects is None
+            else bool(inspect_credential_objects)
+        )
 
         if access_key_id and secret_access_key:
             session = boto3.Session(
@@ -351,12 +407,13 @@ class RealAWSDataSource(AWSDataSource):
         self._iam = session.client("iam")
         self._ec2 = session.client("ec2")
         self._cloudtrail = session.client("cloudtrail")
+        self._sts = session.client("sts")
         self._role_paths: Dict[str, str] = {}
 
         # Resolve the account id once so findings can be attributed. A failure
         # here is non-fatal: the scan still runs, findings are just unattributed.
         self.account_id = self._safe(
-            lambda: session.client("sts").get_caller_identity().get("Account", ""), ""
+            lambda: self._sts.get_caller_identity().get("Account", ""), ""
         )
         self.account_name = self.account_id
 
@@ -663,6 +720,66 @@ class RealAWSDataSource(AWSDataSource):
 
         return self._safe(call, [])
 
+    # --- Opt-in object inspection (see AWSDataSource.read_object_head) ---
+    def read_object_head(self, bucket: str, key: str, max_bytes: int = 65536) -> Optional[bytes]:
+        def call():
+            resp = self._s3.get_object(Bucket=bucket, Key=key, Range=f"bytes=0-{max_bytes - 1}")
+            return resp["Body"].read(max_bytes)
+
+        return self._safe(call, None)
+
+    def access_key_account(self, access_key_id: str) -> Optional[str]:
+        def call():
+            return self._sts.get_access_key_info(AccessKeyId=access_key_id).get("Account")
+
+        return self._safe(call, None)
+
+    # --- Policy simulator ---
+    def principal_arn(self, identity_type: str, name: str) -> Optional[str]:
+        def call():
+            if identity_type == "user":
+                return self._iam.get_user(UserName=name)["User"]["Arn"]
+            return self._iam.get_role(RoleName=name)["Role"]["Arn"]
+
+        return self._safe(call, None)
+
+    def simulate_principal_policy(
+        self,
+        principal_arn: str,
+        actions: Sequence[str],
+        resource_arns: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Dict[str, Any]]]:
+        def call():
+            results: Dict[str, Dict[str, Any]] = {}
+            paginator = self._iam.get_paginator("simulate_principal_policy")
+            for page in paginator.paginate(
+                PolicySourceArn=principal_arn,
+                ActionNames=list(actions),
+                ResourceArns=list(resource_arns or ["*"]),
+            ):
+                for r in page.get("EvaluationResults", []):
+                    action = r["EvalActionName"]
+                    decision = r.get("EvalDecision", "")
+                    previous = results.get(action)
+                    # Several resources can come back for one action; keep the
+                    # most permissive answer, because the question is whether
+                    # the hop can be walked at all.
+                    if previous and previous["decision"] == "allowed":
+                        continue
+                    results[action] = {
+                        "decision": decision,
+                        "allowed_by_boundary": (r.get("PermissionsBoundaryDecisionDetail") or {}).get(
+                            "AllowedByPermissionsBoundary"
+                        ),
+                        "allowed_by_organizations": (r.get("OrganizationsDecisionDetail") or {}).get(
+                            "AllowedByOrganizations"
+                        ),
+                        "missing_context": list(r.get("MissingContextValues") or []),
+                    }
+            return results
+
+        return self._safe(call, None)
+
     def get_account_password_policy(self) -> Dict[str, Any]:
         def call():
             resp = self._iam.get_account_password_policy()
@@ -834,6 +951,7 @@ def get_data_source(
     access_key_id: Optional[str] = None,
     secret_access_key: Optional[str] = None,
     session_token: Optional[str] = None,
+    inspect_credential_objects: Optional[bool] = None,
 ) -> AWSDataSource:
     """A single data source. Demo mode returns the primary account."""
     if mode == "demo":
@@ -844,6 +962,7 @@ def get_data_source(
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             session_token=session_token,
+            inspect_credential_objects=inspect_credential_objects,
         )
     raise ValueError(f"Unknown mode: {mode!r} (expected 'demo' or 'real')")
 
@@ -854,6 +973,7 @@ def get_data_sources(
     access_key_id: Optional[str] = None,
     secret_access_key: Optional[str] = None,
     session_token: Optional[str] = None,
+    inspect_credential_objects: Optional[bool] = None,
 ) -> List[AWSDataSource]:
     """Every account a scan should cover.
 
@@ -875,5 +995,6 @@ def get_data_sources(
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             session_token=session_token,
+            inspect_credential_objects=inspect_credential_objects,
         )
     ]

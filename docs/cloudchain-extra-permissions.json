@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PolicySimulatorForPathValidation",
+      "Effect": "Allow",
+      "Action": [
+        "iam:SimulatePrincipalPolicy",
+        "iam:GetContextKeysForPrincipalPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AccessKeyOwnerLookup",
+      "Effect": "Allow",
+      "Action": "sts:GetAccessKeyInfo",
+      "Resource": "*"
+    },
+    {
+      "Sid": "OptInCredentialObjectInspection",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "*"
+    }
+  ]
+}

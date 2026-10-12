@@ -135,10 +135,21 @@ snapshot. Fingerprints include the account id, because resource names are only
 unique within an account.
 
 **9. Content-aware S3 scanning.** Beyond bucket-level ACL/policy checks,
-CloudChain inspects object *keys* — never contents, it does not call
-`GetObject` — inside public buckets for credential-like naming patterns
-(`credentials.csv`, `.pem`, `.env`, `id_rsa`, …), which is what feeds the graph
-engine a real entry point.
+CloudChain inspects object *keys* inside public buckets for credential-like
+naming patterns (`credentials.csv`, `.pem`, `.env`, `id_rsa`, …), which is what
+feeds the graph engine a real entry point. By default it never reads object
+contents.
+
+On a real account, a key name alone can't say *whose* credentials leaked, so
+the chain stops there. With `--inspect-credential-objects` (or
+`CLOUDCHAIN_INSPECT_CREDENTIAL_OBJECTS=1`), CloudChain reads the first 64 KB of
+credential-shaped objects in **public** buckets only, extracts access key IDs
+(`AKIA…`), and matches them against `iam:ListAccessKeys`. A match names the
+leaked user and the internet-to-admin chain can be drawn on a live account.
+Secret keys are never extracted, the bytes are discarded straight away, and
+only masked IDs (`AKIA****MPLE`) reach the report. Keys owned by another
+account are reported with that account ID via `sts:GetAccessKeyInfo`;
+temporary `ASIA…` keys are reported as unattributable.
 
 ## Architecture
 
@@ -165,7 +176,7 @@ CloudChain/
       report/generator.py # assembles the final JSON report
       report/pdf.py       # renders that same report as a downloadable PDF
     Dockerfile
-    tests/                # 194 tests; fixtures/ holds sample Terraform plans
+    tests/                # 222 tests; fixtures/ holds sample Terraform plans
   frontend/
     src/
       components/
@@ -214,7 +225,7 @@ carries `AdministratorAccess`. `OrgDeploymentRole` looks entirely reasonable
 inside its own account; `svc-deploy-bot` looks like an ordinary
 over-permissioned service account inside prod. The pair is wide open.
 
-The demo account scores **24/100, grade F**, with reachability the largest
+The demo account scores **22/100, grade F**, with reachability the largest
 single contributor. Both chains validate as `CONFIRMED` end to end.
 
 ## Quick start with Docker
@@ -309,6 +320,16 @@ python -m app.cli scan --mode real
 The account needs read-only permissions for S3, IAM, and EC2 (the `SecurityAudit`
 managed policy covers it). Missing permissions degrade gracefully with a warning
 instead of crashing the scan.
+
+Two features need a little more than `SecurityAudit`. Attach
+[`docs/cloudchain-extra-permissions.json`](docs/cloudchain-extra-permissions.json)
+as an inline policy on the same user if you want them:
+
+- `iam:SimulatePrincipalPolicy`, so path validation can ask AWS's own policy
+  evaluator about each hop. Without it, validation still runs on the static
+  analysis and says the simulator was unavailable.
+- `s3:GetObject` and `sts:GetAccessKeyInfo`, only for
+  `--inspect-credential-objects`. Drop that statement if you don't use the flag.
 
 [`docs/testing-against-real-aws.md`](docs/testing-against-real-aws.md) walks
 through validating real mode against a free-tier account end to end — IAM setup,
@@ -410,10 +431,19 @@ structurally rather than by convention.
   validation ever touches anything else.
 - **No escalation is ever performed.** No role is assumed, no function created,
   no policy attached. Preconditions are verified; the attack is not run.
-- **Object contents are never read.** The S3 checks confirm a bucket is public
-  and that a credential-shaped key is *listable*. `GetObject` is never called —
-  whether that file really contains live credentials is not something a scanner
-  should determine by reading it.
+- **Object contents are not read unless you opt in.** By default the S3 checks
+  confirm a bucket is public and that a credential-shaped key is *listable*.
+  The only `GetObject` call in the codebase sits behind
+  `--inspect-credential-objects`, is limited to public buckets and the first
+  64 KB, and keeps nothing but masked key IDs. Validation never reads objects,
+  opt-in or not, and a test asserts it.
+- **AWS gets a second opinion.** When the scanning identity can call
+  `iam:SimulatePrincipalPolicy`, every permission hop is also checked with
+  AWS's own policy evaluator, which applies explicit Deny, permissions
+  boundaries and SCPs. A hop the static analysis confirms but the simulator
+  denies comes back `REFUTED`, naming the layer that blocked it. A condition
+  the simulator can't evaluate without request context comes back
+  `UNVERIFIABLE`, never `REFUTED`.
 - **Missing information never reads as a pass.** An `AccessDenied` or an
   unresolvable policy yields `UNVERIFIABLE`, never `CONFIRMED`. There's a test
   for this specifically, because it's the failure mode that would quietly turn
@@ -474,7 +504,7 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-194 tests covering scanner logic, attack-path graph construction, cross-account
+222 tests covering scanner logic, attack-path graph construction, cross-account
 correlation, risk scoring, the posture engine's explainability contract,
 path validation and its safety guarantees, CloudTrail attribution, Terraform
 plan parity, escalation-route discovery, PDF export, drift detection, and the
@@ -492,17 +522,21 @@ A few are worth reading as documentation of intent:
 | `test_no_matching_event_is_unattributed_not_guessed` | Attribution never invents a culprit |
 | `test_events_do_not_leak_between_accounts` | A resource name in one account can't match another's trail |
 | `test_public_state_never_leaks_credentials` | Submitted keys never reach the browser |
+| `test_scp_denial_refutes_a_statically_confirmed_hop` | AWS's own evaluator can overturn the static analysis |
+| `test_missing_condition_context_is_unverifiable_not_refuted` | "Couldn't decide" is never reported as "blocked" |
+| `test_secret_never_reaches_the_findings_and_key_id_is_masked` | Opt-in object inspection keeps nothing but masked key IDs |
+| `test_dense_graph_stays_bounded` | Path search can't blow up on a densely connected org |
 
 ## Known limitations
 
 Worth being able to state plainly — most of these are deliberate.
 
-- **Credential-leak correlation in real mode is limited by design.** CloudChain
-  never downloads object contents, only inspects key names, so it can flag
-  *that* a bucket exposes credential-like files but can't automatically prove
-  *whose* credentials without an external mapping (a secrets-scanning pipeline,
-  for example). Demo mode uses a ground-truth hint to make the full chain
-  reproducible without one.
+- **Credential-leak correlation in real mode is opt-in.** Without
+  `--inspect-credential-objects`, CloudChain only inspects key names, so it can
+  flag *that* a bucket exposes credential-like files but not *whose*. With it,
+  only long-lived `AKIA` keys belonging to a user in the scanned account can be
+  matched. Demo mode uses a ground-truth hint so the full chain is reproducible
+  without either.
 - **Real mode scans one account.** The graph is organisation-wide and the demo
   exercises three accounts, but scanning a live AWS Organization needs a
   management-account role and an `sts:AssumeRole` fan-out, which CloudChain
@@ -517,9 +551,13 @@ Worth being able to state plainly — most of these are deliberate.
   confirmed by pointing CloudChain at rooms built around each of them and
   correctly getting nothing back.
 - **Explicit Deny, SCPs, permission boundaries and condition keys are not
-  modelled.** All four can make a grant that looks live actually unusable, so a
-  permission finding is a *claim* — which is precisely why the validation engine
-  exists to re-check it rather than trusting the analysis.
+  modelled by the scanner.** All four can make a grant that looks live
+  actually unusable, so a permission finding is a *claim*. The validation
+  engine re-checks it with `iam:SimulatePrincipalPolicy`, which does apply
+  them, but only when the scanning identity is allowed to call it.
+- **Path search is bounded.** Chains longer than `CLOUDCHAIN_MAX_PATH_HOPS`
+  (default 6, or `--max-hops`) are not enumerated, because simple-path
+  enumeration is exponential in the worst case.
 - **Key age can't be tested in an ephemeral lab.** `IAM_STALE_ACCESS_KEY` needs
   a key older than 90 days. Training environments are provisioned minutes before
   you scan them, so the check correctly finds nothing there — a limitation of

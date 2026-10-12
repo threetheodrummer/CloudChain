@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from app.jobs import get_job, start_scan
 from app.pipeline import STAGES, run_scan
 
@@ -47,9 +49,35 @@ def test_job_is_retrievable_by_id():
     _wait(job)
 
 
-def test_public_state_never_leaks_credentials():
-    # A real-mode job is started with bogus keys; it will fail (no AWS), but
-    # the state returned to the browser must never contain the secret.
+def _fake_real_scan_failing(**kwargs):
+    # Stands in for a real-mode scan that AWS rejects. Kept offline on purpose:
+    # the test is about what the job exposes, not about reaching AWS, and a
+    # test that needs the internet fails on every laptop without it.
+    raise RuntimeError("InvalidClientTokenId: The security token included in the request is invalid")
+
+
+def _fake_real_scan_succeeding(**kwargs):
+    # Same keys, but the scan "works" by returning the demo result, so the
+    # success path is checked as well as the failure path.
+    kwargs = {k: v for k, v in kwargs.items() if k not in ("access_key_id", "secret_access_key", "session_token")}
+    kwargs.update(mode="demo", persist=False, stage_delay=0.0)
+    return run_scan(**kwargs)
+
+
+@pytest.mark.parametrize("fake_scan", [_fake_real_scan_failing, _fake_real_scan_succeeding])
+def test_public_state_never_leaks_credentials(monkeypatch, fake_scan):
+    # The state returned to the browser must never contain the submitted keys,
+    # whether the scan fails or succeeds.
+    import app.jobs as jobs
+
+    seen = {}
+
+    def spy(**kwargs):
+        seen.update(kwargs)
+        return fake_scan(**kwargs)
+
+    monkeypatch.setattr(jobs, "run_scan", spy)
+
     secret = "TOTALLY-SECRET-VALUE-123"
     job = start_scan(
         mode="real",
@@ -59,6 +87,10 @@ def test_public_state_never_leaks_credentials():
         session_token=None,
     )
     _wait(job)
+
+    # The keys did reach the scanner (otherwise this test proves nothing)...
+    assert seen.get("secret_access_key") == secret
+    # ...but never the browser.
     payload = repr(job.public_state())
     assert secret not in payload
     assert "AKIAFAKE" not in payload

@@ -42,6 +42,22 @@ class Settings:
     # cannot see in the output is indistinguishable from a bug, and name-based
     # matching is spoofable by anyone who can choose a role name -- so the
     # report always states which rule fired and on what.
+    # Longest chain (in hops, i.e. edges) the path search will follow. Simple
+    # path enumeration is exponential in the worst case, so an unbounded search
+    # that is instant on a demo org can stall on a real one. Six hops covers
+    # every chain in the published AWS escalation catalogues with room to spare.
+    max_path_hops: int = int(os.environ.get("CLOUDCHAIN_MAX_PATH_HOPS", "6"))
+
+    # Opt-in: read the first few KB of credential-shaped objects in PUBLIC
+    # buckets, pull out any access key IDs, and match them to IAM users so the
+    # leaked-credentials edge can be drawn on a real account. Off by default
+    # because it is the one place CloudChain calls s3:GetObject. Only key IDs
+    # are kept; the rest of the object (including any secret key) is discarded
+    # in memory and never logged, stored or returned.
+    inspect_credential_objects: bool = os.environ.get(
+        "CLOUDCHAIN_INSPECT_CREDENTIAL_OBJECTS", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+
     benign_role_patterns: tuple = tuple(
         p.strip()
         for p in os.environ.get("CLOUDCHAIN_BENIGN_ROLES", "").split(",")

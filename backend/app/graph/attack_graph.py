@@ -44,10 +44,11 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
+from app.config import settings
 from app.models import AttackPath, Finding, GraphEdge, GraphNode, ScanGraph, Severity
 
 ADMIN_LABEL = "AdministratorAccess"
@@ -269,7 +270,21 @@ def _entry_points(findings_by_resource: Dict[str, List[Finding]]) -> Set[str]:
     return entries
 
 
-def find_attack_paths(g: nx.DiGraph, findings_by_resource: Dict[str, List[Finding]]) -> List[AttackPath]:
+def _max_hops(max_hops: Optional[int]) -> int:
+    """Resolve the hop limit. Always at least 1 so a misconfigured value
+    can't silently turn path search off."""
+    value = settings.max_path_hops if max_hops is None else max_hops
+    return max(1, int(value))
+
+
+def find_attack_paths(
+    g: nx.DiGraph,
+    findings_by_resource: Dict[str, List[Finding]],
+    max_hops: Optional[int] = None,
+) -> List[AttackPath]:
+    """Every simple path from an internet entry point to an admin sink, up to
+    max_hops edges long (default: settings.max_path_hops)."""
+    cutoff = _max_hops(max_hops)
     sinks = [n for n in g.nodes if is_admin_sink(n)]
     if not sinks:
         return []
@@ -280,7 +295,7 @@ def find_attack_paths(g: nx.DiGraph, findings_by_resource: Dict[str, List[Findin
             continue
         for sink in sorted(sinks):
             try:
-                raw_paths = list(nx.all_simple_paths(g, entry, sink))
+                raw_paths = list(nx.all_simple_paths(g, entry, sink, cutoff=cutoff))
             except nx.NodeNotFound:
                 continue
 
@@ -329,7 +344,9 @@ def _build_path(g: nx.DiGraph, raw: List[str], entry_kind: str) -> AttackPath:
 
 
 def find_escalation_paths(
-    g: nx.DiGraph, findings_by_resource: Dict[str, List[Finding]]
+    g: nx.DiGraph,
+    findings_by_resource: Dict[str, List[Finding]],
+    max_hops: Optional[int] = None,
 ) -> List[AttackPath]:
     """Routes to admin that start from an ordinary IAM identity.
 
@@ -347,6 +364,7 @@ def find_escalation_paths(
     Direct identity -> admin edges are excluded: an identity that already holds
     a wildcard policy hasn't escalated, it's simply an admin already.
     """
+    cutoff = _max_hops(max_hops)
     sinks = [n for n in g.nodes if is_admin_sink(n)]
     if not sinks:
         return []
@@ -359,7 +377,7 @@ def find_escalation_paths(
             if start == sink:
                 continue
             try:
-                raw_paths = list(nx.all_simple_paths(g, start, sink))
+                raw_paths = list(nx.all_simple_paths(g, start, sink, cutoff=cutoff))
             except nx.NodeNotFound:
                 continue
             for raw in raw_paths:

@@ -138,6 +138,21 @@ def main() -> None:
     scan_p.add_argument("--mode", choices=["demo", "real"], default="demo")
     scan_p.add_argument("--region", default=None)
     scan_p.add_argument("--json", action="store_true", help="Print raw JSON instead of a formatted report")
+    scan_p.add_argument(
+        "--inspect-credential-objects",
+        action="store_true",
+        help=(
+            "Real mode only, opt-in: read the first 64 KB of credential-shaped objects in "
+            "PUBLIC buckets and match any access key IDs to IAM users. Key IDs only; "
+            "contents are discarded and never stored."
+        ),
+    )
+    scan_p.add_argument(
+        "--max-hops",
+        type=int,
+        default=None,
+        help="Longest attack chain to search for, in hops (default: CLOUDCHAIN_MAX_PATH_HOPS or 6)",
+    )
 
     hist_p = sub.add_parser("history", help="List past scans")
     hist_p.add_argument("--mode", choices=["demo", "real"], default=None)
@@ -159,7 +174,12 @@ def main() -> None:
         return _run_plan(args)
 
     if args.command == "scan":
-        result, drift = run_scan(mode=args.mode, region=args.region)
+        result, drift = run_scan(
+            mode=args.mode,
+            region=args.region,
+            inspect_credential_objects=True if args.inspect_credential_objects else None,
+            max_hops=args.max_hops,
+        )
         report = build_report(result, drift)
         if args.json:
             print(json.dumps(report, indent=2, default=str))

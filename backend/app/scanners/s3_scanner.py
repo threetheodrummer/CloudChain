@@ -11,9 +11,11 @@ public" finding.
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import List, Optional
 
+from app.config import settings
 from app.models import Finding, Severity
+from app.scanners.credential_match import KeyOwnerIndex, correlate_leaked_credentials
 from app.sources import AWSDataSource
 
 CREDENTIAL_KEY_PATTERNS = [
@@ -29,8 +31,33 @@ def _matches_sensitive_pattern(key: str) -> bool:
 class S3Scanner:
     resource_type = "s3_bucket"
 
-    def __init__(self, source: AWSDataSource):
+    def __init__(self, source: AWSDataSource, inspect_credential_objects: Optional[bool] = None):
         self.source = source
+        # Explicit argument wins, then the source's own setting (set by the CLI
+        # flag), then the environment. Off unless someone asked for it.
+        if inspect_credential_objects is None:
+            inspect_credential_objects = getattr(
+                source, "inspect_credential_objects", settings.inspect_credential_objects
+            )
+        self.inspect_credential_objects = bool(inspect_credential_objects)
+        self._key_index: Optional[KeyOwnerIndex] = None
+
+    def _identify_leak(self, bucket: str, matched: List[str]):
+        """Name the identity a public credential-shaped object belongs to.
+
+        Demo mode answers from ground truth. Real mode answers only when the
+        operator opted in to object inspection; otherwise the finding is still
+        raised, just without an identity, so no edge is drawn.
+        """
+        hint = self.source.leaked_credentials_hint(bucket)
+        if hint:
+            return hint, {"method": "demo_ground_truth"}
+        if not self.inspect_credential_objects:
+            return None, {"method": "not_inspected"}
+        if self._key_index is None:
+            self._key_index = KeyOwnerIndex(self.source)
+        result = correlate_leaked_credentials(self.source, bucket, matched, self._key_index)
+        return result["user"], result
 
     def scan(self) -> List[Finding]:
         findings: List[Finding] = []
@@ -75,7 +102,7 @@ class S3Scanner:
                 matched = [k for k in object_keys if _matches_sensitive_pattern(k)]
                 sensitive_hit = bool(matched)
                 if matched:
-                    leaked_for = self.source.leaked_credentials_hint(bucket)
+                    leaked_for, correlation = self._identify_leak(bucket, matched)
                     findings.append(
                         Finding(
                             resource_id=bucket,
@@ -93,7 +120,11 @@ class S3Scanner:
                                 "Rotate any credentials referenced by these objects immediately, "
                                 "remove them from the bucket, and make the bucket private."
                             ),
-                            evidence={"matched_keys": matched, "leaked_identity_hint": leaked_for},
+                            evidence={
+                                "matched_keys": matched,
+                                "leaked_identity_hint": leaked_for,
+                                "leak_correlation": correlation,
+                            },
                         )
                     )
 
